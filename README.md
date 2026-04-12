@@ -2,7 +2,21 @@
 
 LightWave 3D 5.x plugins for AmigaOS, cross-compiled with GCC.
 
-Current version: `0.8.0`
+Current version: `0.9.0`
+
+## 0.9.0 Highlights
+
+- New **NormalMap** shader plugin: samples a loaded image as a tangent-space
+  normal map and perturbs surface normals at render time.  Supports planar
+  projection (XY/XZ/YZ), tiling, adjustable strength, and DirectX Y-flip.
+  Pairs with PBR and Fresnel for a full modern material stack.
+- New **Motion** plugin: procedural animation for any item (object, light,
+  camera).  Three modes: Wiggle (smooth noise), Bounce (sinusoidal), and
+  Shake (decaying noise burst for camera shake).  Layers on top of
+  keyframed motion with independent position/rotation control.
+- New **Toon** image filter: post-render cel-shading with colour
+  quantisation (2-8 bands) and ink-style outlines via depth and luminance
+  edge detection.  Configurable outline colour, width, and edge sensitivity.
 
 ## 0.8.0 Highlights
 
@@ -77,6 +91,30 @@ complete deflate decompressor so it can read PNGs from any source (Photoshop,
 GIMP, web, etc.). Supports all standard PNG color types (grayscale, RGB,
 indexed, grayscale+alpha, RGBA) and bit depths (1/2/4/8/16).
 
+### NormalMap
+
+Shader plugin that samples a tangent-space normal map image to perturb surface
+normals at render time.  Adds fine surface detail (bricks, rivets, fabric,
+skin pores) to lighting and reflections without extra geometry.  Selects from
+LightWave's loaded image list, supports planar projection (XY/XZ/YZ) with
+tiling, and includes a DirectX Y-flip option.  Stack before Fresnel and PBR
+for best results.
+
+### Motion
+
+Procedural motion plugin for objects, lights, and cameras.  Three modes:
+**Wiggle** (smooth multi-octave noise), **Bounce** (sinusoidal oscillation),
+and **Shake** (decaying noise burst for impacts/explosions).  Affects
+position and/or rotation independently, layers on top of keyframed animation,
+with configurable speed, amplitude per axis, and noise octaves.
+
+### Toon
+
+Post-render image filter that converts any render into a cel-shaded cartoon
+look.  Quantises colours into 2-8 discrete bands and detects edges via depth
+and luminance gradients for ink-style outlines.  Configurable outline colour,
+width (1-3px), and separate depth/colour edge sensitivity controls.
+
 ## Toolchain
 
 Uses `sacredbanana/amiga-compiler:m68k-amigaos` Docker image providing:
@@ -94,6 +132,9 @@ Uses `sacredbanana/amiga-compiler:m68k-amigaos` Docker image providing:
 ./build.sh lensflare # Build LensFlare only
 ./build.sh pngsaver  # Build PNGsaver only
 ./build.sh pngloader # Build PNGloader only
+./build.sh normalmap # Build NormalMap only
+./build.sh motion    # Build Motion only
+./build.sh toon      # Build Toon only
 ./build.sh clean    # Clean build artifacts
 ```
 
@@ -114,6 +155,12 @@ Plugin ShaderInterface PBR pbr.p PBR Shader
 Plugin ImageFilterHandler LensFlare lensflare.p LensFlare
 Plugin ImageSaver PNG(.png) pngsaver.p PNG(.png)
 Plugin ImageLoader PNG(.png) pngloader.p PNG(.png)
+Plugin ShaderHandler NormalMap normalmap.p NormalMap
+Plugin ShaderInterface NormalMap normalmap.p NormalMap
+Plugin ItemMotionHandler Motion motion.p Motion
+Plugin ItemMotionInterface Motion motion.p Motion
+Plugin ImageFilterHandler Toon toon.p Toon
+Plugin ImageFilterInterface Toon toon.p Toon
 ```
 
 ## SDK
@@ -142,5 +189,8 @@ library, patched for GCC compatibility:
     ├── pbr/              # PBR shader source
     ├── lensflare/        # Lens flare image filter source
     ├── pngsaver/         # PNG image saver source
-    └── pngloader/        # PNG image loader source
+    ├── pngloader/        # PNG image loader source
+    ├── normalmap/        # Normal map shader source
+    ├── motion/           # Procedural motion source
+    └── toon/             # Toon cel-shading filter source
 ```

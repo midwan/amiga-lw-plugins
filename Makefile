@@ -111,11 +111,38 @@ $(BUILD)/pngloader.p: $(BUILD)/pngloader.o sdk $(STUBS)
 
 pngloader: $(BUILD)/pngloader.p
 
+# NormalMap - Normal map texture shader
+$(BUILD)/normalmap.o: $(SRC)/normalmap/normalmap.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/normalmap.p: $(BUILD)/normalmap.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+normalmap: $(BUILD)/normalmap.p
+
+# Motion - Procedural motion (wiggle/bounce/shake)
+$(BUILD)/motion.o: $(SRC)/motion/motion.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/motion.p: $(BUILD)/motion.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+motion: $(BUILD)/motion.p
+
+# Toon - Cel-shading image filter
+$(BUILD)/toon.o: $(SRC)/toon/toon.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/toon.p: $(BUILD)/toon.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+toon: $(BUILD)/toon.p
+
 # ---- Targets ----
 
-all: sdk objswap fresnel pbr lensflare pngsaver pngloader
+all: sdk objswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
 
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
 
-.PHONY: all sdk objswap fresnel pbr lensflare pngsaver pngloader clean
+.PHONY: all sdk objswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean
