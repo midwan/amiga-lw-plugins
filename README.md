@@ -2,7 +2,17 @@
 
 LightWave 3D 5.x plugins for AmigaOS, cross-compiled with GCC.
 
-Current version: `0.7.0`
+Current version: `0.8.0`
+
+## 0.8.0 Highlights
+
+- New **PNGsaver** plugin: saves rendered frames as compressed RGB PNG files
+  using LZ77 + fixed Huffman deflate compression with Sub-filtered scanlines.
+  No external libraries required.
+- New **PNGloader** plugin: loads PNG files as textures, backgrounds, and
+  foreground images. Includes a complete deflate decompressor supporting all
+  standard PNG color types (grayscale, RGB, indexed, RGBA) and bit depths
+  (1/2/4/8/16).
 
 ## 0.7.0 Highlights
 
@@ -51,6 +61,22 @@ specular hotspots up to a configurable cap (default 8, maximum 50) and renders
 warm-tinted flares with configurable threshold, radius, streak length, and
 intensity. Applied via the Effects/Image Processing panel.
 
+### PNGsaver
+
+Image saver plugin that adds compressed PNG output support to LightWave's
+rendering pipeline. When selected as the save format in render settings,
+frames are written as standard RGB PNG files with LZ77 + fixed Huffman
+compression and Sub-filtered scanlines. Typical compression ratios are
+70-85% smaller than raw pixel data. No external libraries required.
+
+### PNGloader
+
+Image loader plugin that adds PNG input support to LightWave. Allows loading
+PNG files as textures, background images, and foreground images. Includes a
+complete deflate decompressor so it can read PNGs from any source (Photoshop,
+GIMP, web, etc.). Supports all standard PNG color types (grayscale, RGB,
+indexed, grayscale+alpha, RGBA) and bit depths (1/2/4/8/16).
+
 ## Toolchain
 
 Uses `sacredbanana/amiga-compiler:m68k-amigaos` Docker image providing:
@@ -66,6 +92,8 @@ Uses `sacredbanana/amiga-compiler:m68k-amigaos` Docker image providing:
 ./build.sh fresnel  # Build Fresnel only
 ./build.sh pbr      # Build PBR Shader only
 ./build.sh lensflare # Build LensFlare only
+./build.sh pngsaver  # Build PNGsaver only
+./build.sh pngloader # Build PNGloader only
 ./build.sh clean    # Clean build artifacts
 ```
 
@@ -84,7 +112,8 @@ Plugin ShaderInterface Fresnel fresnel.p Fresnel
 Plugin ShaderHandler PBR pbr.p PBR Shader
 Plugin ShaderInterface PBR pbr.p PBR Shader
 Plugin ImageFilterHandler LensFlare lensflare.p LensFlare
-
+Plugin ImageSaver PNG(.png) pngsaver.p PNG(.png)
+Plugin ImageLoader PNG(.png) pngloader.p PNG(.png)
 ```
 
 ## SDK
@@ -111,5 +140,7 @@ library, patched for GCC compatibility:
     ├── objswap/          # ObjSwap plugin source
     ├── fresnel/          # Fresnel shader source
     ├── pbr/              # PBR shader source
-    └── lensflare/        # Lens flare image filter source
+    ├── lensflare/        # Lens flare image filter source
+    ├── pngsaver/         # PNG image saver source
+    └── pngloader/        # PNG image loader source
 ```

@@ -93,11 +93,29 @@ $(BUILD)/lensflare.p: $(BUILD)/lensflare.o sdk $(STUBS)
 
 lensflare: $(BUILD)/lensflare.p
 
+# PNGsaver - PNG image saver
+$(BUILD)/pngsaver.o: $(SRC)/pngsaver/pngsaver.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/pngsaver.p: $(BUILD)/pngsaver.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+pngsaver: $(BUILD)/pngsaver.p
+
+# PNGloader - PNG image loader
+$(BUILD)/pngloader.o: $(SRC)/pngloader/pngloader.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/pngloader.p: $(BUILD)/pngloader.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+pngloader: $(BUILD)/pngloader.p
+
 # ---- Targets ----
 
-all: sdk objswap fresnel pbr lensflare
+all: sdk objswap fresnel pbr lensflare pngsaver pngloader
 
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
 
-.PHONY: all sdk frameswap clean
+.PHONY: all sdk objswap fresnel pbr lensflare pngsaver pngloader clean
