@@ -36,13 +36,9 @@ pixel data, comparable to standard PNG encoders.
 ## Installation
 
 1. Copy `pngsaver.p` to your LightWave plugins directory
-2. Add this line to your LW config file:
-
-```
-Plugin ImageSaver PNG(.png) pngsaver.p PNG(.png)
-```
-
-3. Restart LightWave
+2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
+3. Navigate to the directory you copied the plugin and select it.
+4. Restart Layout so that the configuration file get updated with the new plug-in entry.
 
 ## Usage
 
