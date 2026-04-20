@@ -28,14 +28,9 @@ colour and width.
 ## Installation
 
 1. Copy `toon.p` to your LightWave plugins directory
-2. Add these lines to your LW config file:
-
-```
-Plugin ImageFilterHandler Toon toon.p Toon
-Plugin ImageFilterInterface Toon toon.p Toon
-```
-
-3. Restart LightWave
+2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
+3. Navigate to the directory you copied the plugin and select it.
+4. Restart Layout so that the configuration file get updated with the new plug-in entry.
 
 ## Usage
 
