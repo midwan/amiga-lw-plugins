@@ -27,15 +27,10 @@ The shader then:
 
 ## Installation
 
-1. Copy `fresnel.p` to your LightWave plugins directory
-2. Add these lines to your LW config file:
-
-```
-Plugin ShaderHandler Fresnel fresnel.p Fresnel
-Plugin ShaderInterface Fresnel fresnel.p Fresnel
-```
-
-3. Restart LightWave
+1. Copy `fresnel.p` to your LightWave plugins directory e.g Toaster:Programs/Plugins/layout
+2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
+3. Navigate to the directory you copied the plugin and select it.
+4. Restart Layout so that the configuration file get updated with the new plug-in entry.
 
 ## Usage
 
