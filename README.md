@@ -22,18 +22,28 @@ workflow, and plugin set.
 | Motion | Item motion | `motion.p` | [README](src/motion/README.md) |
 | Toon | Image filter | `toon.p` | [README](src/toon/README.md) |
 
-## Requirements
+## Installation
 
-- Docker
-- `sacredbanana/amiga-compiler:m68k-amigaos`
+Most users should install a published release rather than build from source.
 
-The Docker image provides:
+1. Download the latest release archive from
+   [GitHub Releases](https://github.com/midwan/amiga-lw-plugin/releases).
+2. Copy the `.p` plugin files you want to use to your LightWave plugins
+   directory on the Amiga.
+3. Start Layout without loading a scene or object.
+4. Open the Options tab, choose **Add Plug-Ins**, and select the copied
+   `.p` file.
+5. Restart Layout so LightWave writes the plugin entry to its config file.
 
-- `m68k-amigaos-gcc` 6.5.0b
-- AmigaOS NDK headers and libraries
-- libnix with `-noixemul` builds
+Each plugin has its own setup and usage notes. See the README linked in the
+plugin table above for the plugin you are installing.
 
-## Building
+## Building From Source
+
+Source builds require Docker and the
+`sacredbanana/amiga-compiler:m68k-amigaos` image. The image provides
+`m68k-amigaos-gcc` 6.5.0b, AmigaOS NDK headers and libraries, and libnix
+for `-noixemul` builds.
 
 Build everything:
 
@@ -63,35 +73,6 @@ Clean generated objects and plugin binaries:
 ```
 
 Build outputs are written to `build/`.
-
-## Installation
-
-Copy the required `.p` files from `build/` to your LightWave plugins
-directory on the Amiga. Then add the relevant plugin registration lines to
-your LightWave config file.
-
-```text
-Plugin ObjReplacementHandler ObjSwap objswap.p ObjSwap
-Plugin ObjReplacementInterface ObjSwap objswap.p ObjSwap
-Plugin ObjReplacementHandler ObjSurfSwap objsurfswap.p ObjSurfSwap
-Plugin ObjReplacementInterface ObjSurfSwap objsurfswap.p ObjSurfSwap
-Plugin ShaderHandler Fresnel fresnel.p Fresnel
-Plugin ShaderInterface Fresnel fresnel.p Fresnel
-Plugin ShaderHandler PBR pbr.p PBR Shader
-Plugin ShaderInterface PBR pbr.p PBR Shader
-Plugin ImageFilterHandler LensFlare lensflare.p LensFlare
-Plugin ImageSaver PNG(.png) pngsaver.p PNG(.png)
-Plugin ImageLoader PNG(.png) pngloader.p PNG(.png)
-Plugin ShaderHandler NormalMap normalmap.p NormalMap
-Plugin ShaderInterface NormalMap normalmap.p NormalMap
-Plugin ItemMotionHandler Motion motion.p Motion
-Plugin ItemMotionInterface Motion motion.p Motion
-Plugin ImageFilterHandler Toon toon.p Toon
-Plugin ImageFilterInterface Toon toon.p Toon
-```
-
-For plugin-specific setup and usage, see the README under each `src/`
-subdirectory.
 
 ## SDK
 
