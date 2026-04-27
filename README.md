@@ -51,6 +51,15 @@ Given a base object `Ship.lwo`, the plugin scans the directory for
 corresponding frames. If no exact frame match exists, the most recent
 replacement before the current frame is used.
 
+### ObjSurfSwap
+
+Surface-preserving Object Replacement plugin for Layout. It uses the same
+frame-numbered object sequence rules as ObjSwap, but creates cached sidecar
+objects that combine each replacement's geometry with the base object's
+surface definitions. Use this when replacement files should inherit the
+colors, textures, shaders, and other surface settings from the object loaded
+in Layout.
+
 ### Fresnel
 
 Physically-based Fresnel shader for Layout. Adds realistic angle-dependent
@@ -127,6 +136,7 @@ Uses `sacredbanana/amiga-compiler:m68k-amigaos` Docker image providing:
 ```bash
 ./build.sh          # Build SDK library + all plugins
 ./build.sh objswap  # Build ObjSwap only
+./build.sh objsurfswap # Build ObjSurfSwap only
 ./build.sh fresnel  # Build Fresnel only
 ./build.sh pbr      # Build PBR Shader only
 ./build.sh lensflare # Build LensFlare only
@@ -148,6 +158,8 @@ on the Amiga, then add the plugin lines to your LW config file:
 ```
 Plugin ObjReplacementHandler ObjSwap objswap.p ObjSwap
 Plugin ObjReplacementInterface ObjSwap objswap.p ObjSwap
+Plugin ObjReplacementHandler ObjSurfSwap objsurfswap.p ObjSurfSwap
+Plugin ObjReplacementInterface ObjSurfSwap objsurfswap.p ObjSurfSwap
 Plugin ShaderHandler Fresnel fresnel.p Fresnel
 Plugin ShaderInterface Fresnel fresnel.p Fresnel
 Plugin ShaderHandler PBR pbr.p PBR Shader
@@ -185,6 +197,7 @@ library, patched for GCC compatibility:
 │   └── source/           # Library source
 └── src/
     ├── objswap/          # ObjSwap plugin source
+    ├── objsurfswap/      # Surface-preserving object swap source
     ├── fresnel/          # Fresnel shader source
     ├── pbr/              # PBR shader source
     ├── lensflare/        # Lens flare image filter source
