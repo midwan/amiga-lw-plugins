@@ -124,7 +124,7 @@ typedef struct {
 
 	/* Blurred Reflections */
 	int    blurReflEnabled;
-	int    blurReflSamples;  /* 4, 8, or 16 */
+	int    blurReflSamples;  /* 2, 4, or 8 */
 	int    blurReflAmount;   /* 0-100 cone spread */
 
 	/* Environment Light */
@@ -143,6 +143,8 @@ static MessageFuncs *msg;
 
 static double pow5_lut[101];
 static int pow5_ready = 0;
+/* sa->rayTrace can re-enter PBR on the ray hit; blur cones stay primary-only. */
+static int blur_trace_depth = 0;
 
 /* ----------------------------------------------------------------
  * Precompute F0 from IOR
@@ -526,7 +528,7 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 
 	/* --- Blurred Reflections: cone-traced rays around reflection dir --- */
 	if (inst->blurReflEnabled && inst->blurReflSamples > 0
-	    && sa->rayTrace && sa->mirror > 0.001) {
+	    && blur_trace_depth == 0 && sa->rayTrace && sa->mirror > 0.001) {
 		double viewDir[3], reflDir[3], dot_vn;
 		double spread, px, py, pz;
 		double dir[3], col[3], pos[3];
@@ -535,7 +537,7 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 		int    validSamples = 0;
 		int    i;
 
-		if (nSamp > 16) nSamp = 16;
+		if (nSamp > 8) nSamp = 8;
 		spread = inst->blurReflAmount / 200.0;
 		if (spread < 0.001) spread = 0.001;
 
@@ -555,6 +557,7 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 		pos[1] = sa->wPos[1] + sa->wNorm[1] * 0.001;
 		pos[2] = sa->wPos[2] + sa->wNorm[2] * 0.001;
 
+		blur_trace_depth++;
 		for (i = 0; i < nSamp; i++) {
 			px = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2],
 			            50000u + (unsigned int)i * 7919u) * spread;
@@ -575,6 +578,7 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 			accB += col[2];
 			validSamples++;
 		}
+		blur_trace_depth--;
 
 		if (validSamples > 0) {
 			double invN = 1.0 / (double)validSamples;
