@@ -40,6 +40,9 @@ Plugin ImageFilterHandler LensFlare lensflare.p LensFlare
 3. Ensure your scene has objects with visible specular highlights
 4. Render — flares appear automatically on bright specular areas
 
+An example scene can be downloaded from Aminet here: 
+https://aminet.net/pix/3dobj/LW_SparklingSea.lha
+
 ### Default Settings
 
 | Setting | Default | Description |
