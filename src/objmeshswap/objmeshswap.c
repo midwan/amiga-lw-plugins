@@ -1,5 +1,5 @@
 /*
- * OBJSURFSWAP.C -- Layout Surface-Preserving Object Replacement Plugin
+ * OBJMESHSWAP.C -- Layout Surface-Preserving Object Replacement Plugin
  * Copyright (c) 2026 Dimitris Panokostas
  *
  * Automatically swaps objects based on frame number derived from
@@ -473,10 +473,10 @@ typedef struct {
 	int         numEntries;
 	int         capacity;
 	int         scanned;
-} ObjSurfSwapInst;
+} ObjMeshSwapInst;
 
 static int
-make_cache_path(ObjSurfSwapInst *inst, const char *src, char *dest, int destMax)
+make_cache_path(ObjMeshSwapInst *inst, const char *src, char *dest, int destMax)
 {
 	char srcHex[9];
 	int  dirLen, nameLen;
@@ -484,14 +484,14 @@ make_cache_path(ObjSurfSwapInst *inst, const char *src, char *dest, int destMax)
 	u32_to_hex(hash_string_pair(src, inst->basePath), srcHex);
 
 	dirLen = strlen(inst->baseDir);
-	nameLen = 17 + 8 + 4; /* "ObjSurfSwapCache-" + hash + ".lwo" */
+	nameLen = 17 + 8 + 4; /* "ObjMeshSwapCache-" + hash + ".lwo" */
 	if (dirLen + nameLen >= destMax) {
 		dest[0] = '\0';
 		return 0;
 	}
 
 	strcpy(dest, inst->baseDir);
-	strcat(dest, "ObjSurfSwapCache-");
+	strcat(dest, "ObjMeshSwapCache-");
 	strcat(dest, srcHex);
 	strcat(dest, ".lwo");
 
@@ -508,7 +508,7 @@ make_cache_temp_path(const char *cachePath, char *tempPath)
 }
 
 static const char *
-surface_preserved_filename(ObjSurfSwapInst *inst, const char *src)
+surface_preserved_filename(ObjMeshSwapInst *inst, const char *src)
 {
 	int made;
 
@@ -714,7 +714,7 @@ find_best_entry(FrameEntry *entries, int n, int frame)
  * ---------------------------------------------------------------- */
 
 static void
-free_entries(ObjSurfSwapInst *inst)
+free_entries(ObjMeshSwapInst *inst)
 {
 	if (inst->entries) {
 		plugin_free(inst->entries);
@@ -725,7 +725,7 @@ free_entries(ObjSurfSwapInst *inst)
 }
 
 static void
-do_scan(ObjSurfSwapInst *inst)
+do_scan(ObjMeshSwapInst *inst)
 {
 	BPTR                 lock;
 	struct FileInfoBlock *fib;
@@ -874,7 +874,7 @@ do_scan(ObjSurfSwapInst *inst)
 }
 
 static void
-scan_from_path(ObjSurfSwapInst *inst, const char *objPath)
+scan_from_path(ObjMeshSwapInst *inst, const char *objPath)
 {
 	strncpy(inst->basePath, objPath, MAX_PATH - 1);
 	inst->basePath[MAX_PATH - 1] = '\0';
@@ -896,11 +896,11 @@ scan_from_path(ObjSurfSwapInst *inst, const char *objPath)
 XCALL_(static LWInstance)
 Create(LWError *err)
 {
-	ObjSurfSwapInst *inst;
+	ObjMeshSwapInst *inst;
 
 	XCALL_INIT;
 
-	inst = (ObjSurfSwapInst *)plugin_alloc(sizeof(ObjSurfSwapInst));
+	inst = (ObjMeshSwapInst *)plugin_alloc(sizeof(ObjMeshSwapInst));
 	if (!inst)
 		return 0;
 
@@ -909,7 +909,7 @@ Create(LWError *err)
 }
 
 XCALL_(static void)
-Destroy(ObjSurfSwapInst *inst)
+Destroy(ObjMeshSwapInst *inst)
 {
 	XCALL_INIT;
 	if (!inst) return;
@@ -918,7 +918,7 @@ Destroy(ObjSurfSwapInst *inst)
 }
 
 XCALL_(static LWError)
-Copy(ObjSurfSwapInst *from, ObjSurfSwapInst *to)
+Copy(ObjMeshSwapInst *from, ObjMeshSwapInst *to)
 {
 	int i;
 
@@ -949,7 +949,7 @@ Copy(ObjSurfSwapInst *from, ObjSurfSwapInst *to)
 }
 
 XCALL_(static LWError)
-Load(ObjSurfSwapInst *inst, const LWLoadState *ls)
+Load(ObjMeshSwapInst *inst, const LWLoadState *ls)
 {
 	XCALL_INIT;
 
@@ -962,7 +962,7 @@ Load(ObjSurfSwapInst *inst, const LWLoadState *ls)
 }
 
 XCALL_(static LWError)
-Save(ObjSurfSwapInst *inst, const LWSaveState *ss)
+Save(ObjMeshSwapInst *inst, const LWSaveState *ss)
 {
 	XCALL_INIT;
 
@@ -973,7 +973,7 @@ Save(ObjSurfSwapInst *inst, const LWSaveState *ss)
 }
 
 XCALL_(static void)
-Evaluate(ObjSurfSwapInst *inst, ObjReplacementAccess *oa)
+Evaluate(ObjMeshSwapInst *inst, ObjReplacementAccess *oa)
 {
 	int bestIdx;
 	const char *target;
@@ -1012,7 +1012,7 @@ Evaluate(ObjSurfSwapInst *inst, ObjReplacementAccess *oa)
  * Interface
  * ---------------------------------------------------------------- */
 
-static ObjSurfSwapInst *ui_inst;
+static ObjMeshSwapInst *ui_inst;
 static char           ui_buf[80];
 
 static int
@@ -1049,7 +1049,7 @@ XCALL_(static int)
 Interface(
 	long           version,
 	GlobalFunc    *global,
-	ObjSurfSwapInst *inst,
+	ObjMeshSwapInst *inst,
 	void          *serverData)
 {
 	LWPanelFuncs *panl;
@@ -1076,7 +1076,7 @@ Interface(
 		static LWValue ival = {LWT_INTEGER};
 		(void)ival;
 
-		pan = PAN_CREATE(panl, "ObjSurfSwap v" PLUGIN_VERSION " (c) D. Panokostas");
+		pan = PAN_CREATE(panl, "ObjMeshSwap v" PLUGIN_VERSION " (c) D. Panokostas");
 		if (!pan)
 			goto fallback;
 
@@ -1134,15 +1134,15 @@ fallback:
 		                   " replacement(s) for ");
 		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
 		                   inst->baseName);
-		(*msg->info)("ObjSurfSwap", infoBuf);
+		(*msg->info)("ObjMeshSwap", infoBuf);
 	} else if (inst->basePath[0]) {
 		str_copy_bounded(infoBuf, sizeof(inst->messageBuf),
 		                 "No replacements for ");
 		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
 		                   inst->baseName);
-		(*msg->info)("ObjSurfSwap", infoBuf);
+		(*msg->info)("ObjMeshSwap", infoBuf);
 	} else {
-		(*msg->info)("ObjSurfSwap",
+		(*msg->info)("ObjMeshSwap",
 		             "Preview a frame to detect files.");
 	}
 
@@ -1186,9 +1186,9 @@ Activate(
  * ---------------------------------------------------------------- */
 
 ServerRecord ServerDesc[] = {
-	{ "ObjReplacementHandler",   "ObjSurfSwap",
+	{ "ObjReplacementHandler",   "ObjMeshSwap",
 	  (ActivateFunc *)Activate },
-	{ "ObjReplacementInterface", "ObjSurfSwap",
+	{ "ObjReplacementInterface", "ObjMeshSwap",
 	  (ActivateFunc *)Interface },
 	{ 0 }
 };

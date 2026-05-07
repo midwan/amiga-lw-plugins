@@ -68,14 +68,14 @@ $(BUILD)/objswap.p: $(BUILD)/objswap.o sdk $(STUBS)
 
 objswap: $(BUILD)/objswap.p
 
-# ObjSurfSwap - Object replacement preserving base surfaces
-$(BUILD)/objsurfswap.o: $(SRC)/objsurfswap/objsurfswap.c | $(BUILD)
+# ObjMeshSwap - Object replacement preserving base surfaces
+$(BUILD)/objmeshswap.o: $(SRC)/objmeshswap/objmeshswap.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/objsurfswap.p: $(BUILD)/objsurfswap.o sdk $(STUBS)
+$(BUILD)/objmeshswap.p: $(BUILD)/objmeshswap.o sdk $(STUBS)
 	$(call build-plugin,$@,$<)
 
-objsurfswap: $(BUILD)/objsurfswap.p
+objmeshswap: $(BUILD)/objmeshswap.p
 
 # Fresnel - Physically-based Fresnel shader
 $(BUILD)/fresnel.o: $(SRC)/fresnel/fresnel.c | $(BUILD)
@@ -151,9 +151,9 @@ toon: $(BUILD)/toon.p
 
 # ---- Targets ----
 
-all: sdk objswap objsurfswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
+all: sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
 
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
 
-.PHONY: all sdk objswap objsurfswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean
+.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean
