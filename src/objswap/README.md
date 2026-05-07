@@ -63,6 +63,9 @@ The plugin looks for files named `basename_N` where:
 
 5. **Preview or Render** your animation. The object will be replaced at each
    frame according to the matching rules above.
+   
+An example scene can be downloaded from Aminet here:
+https://aminet.net/pix/3dobj/LW_CalcCountdown.lha
 
 ## Known Limitations
 
