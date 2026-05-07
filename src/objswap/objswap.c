@@ -387,6 +387,17 @@ do_scan(ObjSwapInst *inst)
 			}
 		}
 
+		/* Do NOT process .info files!
+		 * Certain AmigaOS/Workbench flavors like to
+		 * make these for every file whenever the FS
+		 * is accessed. They will be read by the obj
+		 * scanner, which will crash the plugin.
+		*/
+
+		char * ext = strrchr(fname, '.');
+		if(strcmp(ext, ".info") == 0)
+			continue;
+
 		frame = parse_frame_number(
 			(const char *)fib->fib_FileName,
 			inst->baseName);
