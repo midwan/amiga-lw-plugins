@@ -12,7 +12,7 @@ workflow, and plugin set.
 | Plugin | Class | Output | Documentation |
 |---|---|---|---|
 | ObjSwap | Object replacement | `objswap.p` | [README](src/objswap/README.md) |
-| ObjSurfSwap | Surface-preserving object replacement | `objsurfswap.p` | [README](src/objsurfswap/README.md) |
+| ObjMeshSwap | Surface-preserving object replacement | `objmeshswap.p` | [README](src/objmeshswap/README.md) |
 | Fresnel | Shader | `fresnel.p` | [README](src/fresnel/README.md) |
 | PBR | Shader | `pbr.p` | [README](src/pbr/README.md) |
 | LensFlare | Image filter | `lensflare.p` | [README](src/lensflare/README.md) |
@@ -55,7 +55,7 @@ Build a single plugin:
 
 ```bash
 ./build.sh objswap
-./build.sh objsurfswap
+./build.sh objmeshswap
 ./build.sh fresnel
 ./build.sh pbr
 ./build.sh lensflare
@@ -96,7 +96,7 @@ library patched for GCC compatibility:
 |   `-- source/
 `-- src/
     |-- objswap/
-    |-- objsurfswap/
+    |-- objmeshswap/
     |-- fresnel/
     |-- pbr/
     |-- lensflare/

@@ -1,26 +1,26 @@
-# ObjSurfSwap — Surface-Preserving Object Replacement Plugin for LightWave 3D
+# ObjMeshSwap — Surface-Preserving Object Replacement Plugin for LightWave 3D
 
 Copyright (c) 2026 Dimitris Panokostas
 
-ObjSurfSwap automatically replaces objects during rendering based on frame numbers
+ObjMeshSwap automatically replaces objects during rendering based on frame numbers
 encoded in filenames. This is useful for frame-by-frame animation sequences,
 such as digital counters, flipbook-style animation, or any effect where different
 geometry is needed at specific frames.
 
-ObjSurfSwap is separate from ObjSwap. Use ObjSwap for direct object sequence
-replacement, and use ObjSurfSwap when the replacement geometry should render
+ObjMeshSwap is separate from ObjSwap. Use ObjSwap for direct object sequence
+replacement, and use ObjMeshSwap when the replacement geometry should render
 with the surface definitions from the object loaded in Layout.
 
 ## How It Works
 
 1. You load a **base object** in Layout (e.g., `digit`)
-2. You activate ObjSurfSwap on that object via **Obj Rep Plug-ins**
+2. You activate ObjMeshSwap on that object via **Obj Rep Plug-ins**
 3. The plugin scans the same directory for files matching the pattern
    `basename_N` where N is a frame number
 4. During preview or render, the object is automatically replaced with the
    correct file for each frame
 
-ObjSurfSwap preserves the surface settings from the base object file.
+ObjMeshSwap preserves the surface settings from the base object file.
 For numbered replacement objects, it creates a sidecar copy next to the source
 object with the replacement object's geometry and `SRFS` surface name list,
 but with the base object's top-level `SURF` chunks. Polygon assignments still
@@ -56,7 +56,7 @@ The plugin looks for files named `basename_N` where:
 
 ## Installation
 
-1. Copy `objsurfswap.p` to your LightWave plugins directory
+1. Copy `objmeshswap.p` to your LightWave plugins directory
 2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
 3. Navigate to the directory you copied the plugin and select it.
 4. Restart Layout so that the configuration file get updated with the new plug-in entry.
@@ -69,7 +69,7 @@ The plugin looks for files named `basename_N` where:
 
 2. **Select the object** in the Objects panel.
 
-3. Click **Obj Rep Plug-ins** and select **ObjSurfSwap** from the popup menu.
+3. Click **Obj Rep Plug-ins** and select **ObjMeshSwap** from the popup menu.
 
 4. (Optional) Click **Options** to see which replacement files were found and
    their frame assignments.
@@ -96,7 +96,7 @@ The plugin looks for files named `basename_N` where:
 - **Loading any variant**: You can load any numbered variant as the base
   object (e.g., `digit_5`). The plugin will strip the `_5` suffix and
   discover all siblings automatically. When the current frame maps back to
-  that loaded object file, ObjSurfSwap keeps it loaded as-is so its own surface
+  that loaded object file, ObjMeshSwap keeps it loaded as-is so its own surface
   settings remain available for later replacements.
 
 - **Scene persistence**: The plugin settings are saved with the scene file.
@@ -111,7 +111,7 @@ The plugin looks for files named `basename_N` where:
 
 - **Surface preservation**: Keep the intended render surfaces on the base
   object. Numbered objects should use the same surface names when they need
-  those base surface settings. ObjSurfSwap may create `ObjSurfSwapCache-*.lwo`
+  those base surface settings. ObjMeshSwap may create `ObjMeshSwapCache-*.lwo`
   sidecar files beside the sequence objects; these contain replacement
   geometry plus the base object's surface definitions. Keep these with the
   project if you save scenes after previewing or rendering swapped frames.
