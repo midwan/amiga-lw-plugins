@@ -52,6 +52,7 @@ typedef struct st_ServerRecord {
 
 extern BPTR  Open(const STRPTR name, long mode);
 extern long  Read(BPTR fh, void *buf, long len);
+extern long  Seek(BPTR fh, long offset, long mode);
 extern long  Close(BPTR fh);
 extern void *AllocMem(unsigned long size, unsigned long flags);
 extern void  FreeMem(void *memory, unsigned long size);
@@ -63,6 +64,7 @@ extern void  FreeMem(void *memory, unsigned long size);
 #define OBJSTAT_FAILED   99
 #define OBJPOLF_FACE     0
 #define MODE_OLDFILE     1005
+#define OFFSET_CURRENT   1
 #define MEMF_PUBLIC      0x00000001UL
 #define MEMF_CLEAR       0x00010000UL
 
@@ -154,7 +156,12 @@ read_line(BPTR fh, char *buf, int bufsize)
 			break;
 		}
 
-		if (ch == '\r' || ch == '\n')
+		if (ch == '\r') {
+			if (Read(fh, &ch, 1) == 1 && ch != '\n')
+				Seek(fh, -1, OFFSET_CURRENT);
+			break;
+		}
+		if (ch == '\n')
 			break;
 
 		if (pos < bufsize - 1)
@@ -184,9 +191,24 @@ str_to_int(const char *s, const char **end)
 		sign = -1;
 	}
 
-	while (*p >= '0' && *p <= '9') {
-		value = (value * 10) + (*p - '0');
-		p++;
+	if (*p == '0' && (p[1] == 'x' || p[1] == 'X')) {
+		p += 2;
+		while (1) {
+			if (*p >= '0' && *p <= '9')
+				value = (value * 16) + (*p - '0');
+			else if (*p >= 'a' && *p <= 'f')
+				value = (value * 16) + (*p - 'a' + 10);
+			else if (*p >= 'A' && *p <= 'F')
+				value = (value * 16) + (*p - 'A' + 10);
+			else
+				break;
+			p++;
+		}
+	} else {
+		while (*p >= '0' && *p <= '9') {
+			value = (value * 10) + (*p - '0');
+			p++;
+		}
 	}
 
 	if (end) *end = p;
