@@ -149,11 +149,20 @@ $(BUILD)/toon.p: $(BUILD)/toon.o sdk $(STUBS)
 
 toon: $(BUILD)/toon.p
 
+# GeoImport - VideoScape GEO object loader
+$(BUILD)/geoimport.o: $(SRC)/geoimport/geoimport.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/geoimport.p: $(BUILD)/geoimport.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+geoimport: $(BUILD)/geoimport.p
+
 # ---- Targets ----
 
-all: sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
+all: sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport
 
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
 
-.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean
+.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport clean
