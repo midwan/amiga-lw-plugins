@@ -152,7 +152,9 @@ toon: $(BUILD)/toon.p
 
 # ---- Targets ----
 
-all: sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
+PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
+
+all: sdk $(PLUGINS)
 
 # ---- FPU variants ----
 # Each variant is a full `all` build with its own CPU flags, build directory
@@ -169,8 +171,42 @@ fpu: $(FPU_VARIANTS)
 $(FPU_VARIANTS):
 	$(MAKE) all CPUFLAGS="$(CPUFLAGS_$@)" BUILD=build-$@ SDK_LIB=build-$@/sdklib
 
+# ---- Release package ----
+# LW-Plugins-<version>.lha: Installer script, the Generic build and every FPU
+# variant, plus per-plugin docs converted to Latin-1 for Amiga text viewers
+# (iconv fails on characters package/latin1.sed does not map).
+# Level-1 LHA headers: 7-Zip mis-extracts level-0 paths written by LHa for UNIX.
+PKG_ROOT  = LW-Plugins
+PKG_DIR   = $(BUILD)/package
+PKG_STAGE = $(PKG_DIR)/$(PKG_ROOT)
+PKG_LHA   = $(BUILD)/$(PKG_ROOT)-$(PVER).lha
+
+package: all fpu
+	rm -rf $(PKG_DIR) $(PKG_LHA)
+	mkdir -p $(PKG_STAGE)/Plugins/Generic $(PKG_STAGE)/Docs
+	cp $(PLUGINS:%=$(BUILD)/%.p) $(PKG_STAGE)/Plugins/Generic/
+	for v in $(FPU_VARIANTS); do \
+		mkdir -p $(PKG_STAGE)/Plugins/$$v && \
+		cp $(PLUGINS:%=build-$$v/%.p) $(PKG_STAGE)/Plugins/$$v/ || exit 1; \
+	done
+	for d in Generic $(FPU_VARIANTS); do cp package/icons/drawer.info $(PKG_STAGE)/Plugins/$$d.info || exit 1; done
+	sed 's/@VERSION@/$(PVER)/' package/Install | tr -d '\r' > $(PKG_STAGE)/Install
+	cp package/icons/Install.info $(PKG_STAGE)/Install.info
+	cp package/icons/drawer.info $(PKG_STAGE)/Plugins.info
+	cp package/icons/drawer.info $(PKG_STAGE)/Docs.info
+	cp package/icons/drawer.info $(PKG_DIR)/$(PKG_ROOT).info
+	for p in $(PLUGINS); do \
+		tr -d '\r' < src/$$p/README.md | sed -f package/latin1.sed > $(PKG_DIR)/doc.tmp && \
+		iconv -f UTF-8 -t ISO-8859-1 $(PKG_DIR)/doc.tmp > $(PKG_STAGE)/Docs/$$p.txt && \
+		cp package/icons/doc.info $(PKG_STAGE)/Docs/$$p.txt.info || exit 1; \
+	done
+	tr -d '\r' < LICENSE > $(PKG_STAGE)/Docs/LICENSE.txt
+	cp package/icons/doc.info $(PKG_STAGE)/Docs/LICENSE.txt.info
+	rm -f $(PKG_DIR)/doc.tmp
+	cd $(PKG_DIR) && lha c1o5 $(CURDIR)/$(PKG_LHA) $(PKG_ROOT) $(PKG_ROOT).info
+
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
-	rm -rf $(addprefix build-,$(FPU_VARIANTS))
+	rm -rf $(addprefix build-,$(FPU_VARIANTS)) $(PKG_DIR) $(BUILD)/$(PKG_ROOT)-*.lha
 
-.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean fpu $(FPU_VARIANTS)
+.PHONY: all sdk $(PLUGINS) clean fpu $(FPU_VARIANTS) package

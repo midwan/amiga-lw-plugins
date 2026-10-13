@@ -1,0 +1,152 @@
+; LightWave Plugins Installer
+; Classic AmigaOS 68k package installer. The Makefile package target fills
+; in #version when it builds the release archive.
+
+(set @app-name "LightWave Plugins")
+(set #version "@VERSION@")
+
+(welcome
+	(cat "LightWave 3D 5.x plugins " #version " for AmigaOS (68020 or better).\n\n"
+		"Installer copies the plugin build that matches your CPU and FPU into your LightWave plug-ins drawer.")
+)
+
+; --------------------------------------------------------------------
+; Build variant. The FPU builds run the shader, filter and motion maths
+; on the FPU; the Generic build uses software floating point and runs on
+; any 68020 or better, including 68EC020/68EC030/68LC040/68LC060.
+
+; (database "fpu") answers "unknown" on the OS 3.1 Installer (43.x), so an
+; FPU build is preselected only when the Installer reports an FPU; an
+; unknown or missing FPU defaults to Generic, which runs everywhere.
+(set #cpu (database "cpu"))
+(set #fpu (database "fpu"))
+(set #has-fpu
+	(AND (<> #fpu "NOFPU")
+		(AND (<> #fpu "unknown") (<> #fpu ""))))
+(set #is060
+	(OR (= #cpu "68060")
+		(<> (getversion "68060.library" (resident)) 0)))
+(set #variant
+	(if (NOT #has-fpu)
+		0
+		(if #is060
+			3
+			(if (= #cpu "68040")
+				2
+				(if (OR (= #cpu "68020") (= #cpu "68030")) 1 0)))))
+
+(set #variant
+	(askchoice
+		(prompt
+			"Which plugin build should be installed?\n\n"
+			"Detected CPU: " #cpu "\nDetected FPU: " #fpu)
+		(help
+			"Generic: runs on any 68020 or better, with or without an FPU. Use it on 68EC020/68EC030, 68LC040 and 68LC060 systems, or when unsure.\n\n"
+			"68020/68030 + FPU: needs a 68881 or 68882 coprocessor.\n\n"
+			"68040: needs a full 68040 with its built-in FPU.\n\n"
+			"68060: needs a full 68060 with its built-in FPU and 68060.library.\n\n"
+			"The 68040 and 68060 builds use instructions a 68881/68882 does not have. The 68020/68030 build runs on a 68040/68060 only through slow emulation.\n\n"
+			"The detected CPU and FPU select the default. If this Installer cannot report the FPU, Generic is preselected: pick the FPU build yourself when your CPU has one.")
+		(choices
+			"Generic (68020+, no FPU needed)"
+			"68020/68030 with 68881/68882 FPU"
+			"68040 with FPU"
+			"68060 with FPU")
+		(default #variant)))
+
+(set #srcdir (tackon "Plugins" (select #variant "Generic" "020fpu" "040fpu" "060fpu")))
+
+; --------------------------------------------------------------------
+; Destination.
+
+(set #dest
+	(if (exists "Toaster:Programs/Plug-Ins/Layout" (noreq))
+		"Toaster:Programs/Plug-Ins/Layout"
+		(if (exists "SYS:LightWaveRTG/Programs/Plug-Ins/Layout" (noreq))
+			"SYS:LightWaveRTG/Programs/Plug-Ins/Layout"
+			(if (exists "Toaster:Programs/Plug-Ins" (noreq))
+				"Toaster:Programs/Plug-Ins"
+				"SYS:"))))
+
+(set #dest
+	(askdir
+		(prompt "Where should the plugins be installed?")
+		(help "Choose the drawer that holds your LightWave Layout plug-ins, for example Toaster:Programs/Plug-Ins/Layout. Existing plugins with the same name are replaced.")
+		(default #dest)))
+(set @default-dest #dest)
+
+; --------------------------------------------------------------------
+; Plugin selection.
+
+; Installer 43.x returns only the choices that fit its fixed window (nine
+; lines), so related plugins share one entry to keep the list at eight.
+(set #plugins
+	(if (= @user-level 0)
+		255
+		(askoptions
+			(prompt "Select the plugins to install.")
+			(help "All plugins are selected by default. Each one is described in the documentation drawer.")
+			(choices
+				"ObjSwap + ObjMeshSwap (object replacement)"
+				"Fresnel (shader)"
+				"PBR (shader)"
+				"NormalMap (shader)"
+				"LensFlare (image filter)"
+				"Toon (image filter)"
+				"Motion (item motion)"
+				"PNGloader + PNGsaver (image I/O)")
+			(default 255))))
+
+; Procedure arguments need Installer 44+; OS 3.1 ships 43.x, so the copy
+; procedure reads the #bit/#file globals instead.
+(procedure P_Plugin
+	(if (IN #plugins #bit)
+		(copyfiles
+			(prompt (cat "Install " #file))
+			(help @copyfiles-help)
+			(source (tackon #srcdir #file))
+			(dest #dest))))
+
+(set #bit 0 #file "objswap.p") (P_Plugin)
+(set #bit 0 #file "objmeshswap.p") (P_Plugin)
+(set #bit 1 #file "fresnel.p") (P_Plugin)
+(set #bit 2 #file "pbr.p") (P_Plugin)
+(set #bit 3 #file "normalmap.p") (P_Plugin)
+(set #bit 4 #file "lensflare.p") (P_Plugin)
+(set #bit 5 #file "toon.p") (P_Plugin)
+(set #bit 6 #file "motion.p") (P_Plugin)
+(set #bit 7 #file "pngloader.p") (P_Plugin)
+(set #bit 7 #file "pngsaver.p") (P_Plugin)
+
+(complete 80)
+
+; --------------------------------------------------------------------
+; Documentation.
+
+(if
+	(askbool
+		(prompt "Install the plugin documentation?")
+		(help "Copies a LW-Plugins drawer with one text file per plugin, the readme and the license.")
+		(default 1))
+	(
+		(set #docparent
+			(askdir
+				(prompt "Where should the LW-Plugins documentation drawer be created?")
+				(help "A drawer named LW-Plugins is created inside the drawer you choose.")
+				(default (if (exists "Toaster:Documentation" (noreq)) "Toaster:Documentation" "SYS:"))))
+		(set #docdest (tackon #docparent "LW-Plugins"))
+		(if (NOT (exists #docdest (noreq))) (makedir #docdest (infos)))
+		(copyfiles
+			(prompt "Install documentation")
+			(help @copyfiles-help)
+			(source "Docs")
+			(dest #docdest)
+			(all)
+			(infos))))
+
+(complete 100)
+
+(exit
+	"The plugins are in " #dest ".\n\n"
+	"To register a new plugin, start Layout without loading a scene, open Options > Add Plug-ins, select the .p file, then restart Layout. "
+	"Plugins that are already registered under the same file name pick up the new build on the next start.")

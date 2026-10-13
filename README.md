@@ -26,14 +26,27 @@ workflow, and plugin set.
 
 Most users should install a published release rather than build from source.
 
-1. Download the latest release archive from
-   [GitHub Releases](https://github.com/midwan/amiga-lw-plugin/releases).
-2. Copy the `.p` plugin files you want to use to your LightWave plugins
-   directory on the Amiga.
+1. Download `LW-Plugins-<version>.lha` from
+   [GitHub Releases](https://github.com/midwan/amiga-lw-plugins/releases)
+   and extract it on the Amiga.
+2. Run the `Install` icon in the `LW-Plugins` drawer (needs the Commodore
+   Installer). It detects the CPU and FPU, preselects the matching build,
+   and copies the plugins you choose into your LightWave plug-ins drawer,
+   plus optional documentation.
 3. Start Layout without loading a scene or object.
 4. Open the Options tab, choose **Add Plug-Ins**, and select the copied
    `.p` file.
 5. Restart Layout so LightWave writes the plugin entry to its config file.
+
+The archive holds four builds of every plugin under `LW-Plugins/Plugins/`.
+To install by hand, copy the `.p` files from the drawer matching your CPU:
+
+| Drawer | CPU |
+|---|---|
+| `Generic` | Any 68020 or better, with or without FPU (68EC020/030, 68LC040/060) |
+| `020fpu` | 68020/68030 with a 68881/68882 |
+| `040fpu` | 68040 with FPU |
+| `060fpu` | 68060 with FPU |
 
 Each plugin has its own setup and usage notes. See the README linked in the
 plugin table above for the plugin you are installing.
@@ -73,6 +86,13 @@ Clean generated objects and plugin binaries:
 ```
 
 Build outputs are written to `build/`.
+
+Build the release archive (`build/LW-Plugins-<version>.lha`, all four builds,
+Installer script and Latin-1 docs):
+
+```bash
+./build.sh package
+```
 
 ### FPU builds
 
