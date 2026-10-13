@@ -27,7 +27,7 @@ The shader then:
 
 ## Installation
 
-1. Copy `fresnel.p` to your LightWave plugins directory e.g Toaster:Programs/Plugins/layout
+1. Run `Install` from the `LW-Plugins` release archive, or copy `fresnel.p` from the archive's `Plugins/` drawer that matches your CPU (`Generic`, `020fpu`, `040fpu` or `060fpu`) to your LightWave plugins directory e.g Toaster:Programs/Plug-Ins/Layout
 2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
 3. Navigate to the directory you copied the plugin and select it.
 4. Restart Layout so that the configuration file get updated with the new plug-in entry.
