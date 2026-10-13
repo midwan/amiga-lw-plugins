@@ -1,0 +1,34 @@
+# zzpoke script for the OS 3.1 Installer (43.3) on a 1280x1024 Workbench.
+# Coordinates are relative to the Installer window (448x159 at 416,432).
+# Ticks: 50 = 1 s.
+wait 150
+# Welcome: Intermediate user, Proceed With Install
+click 42 89
+wait 50
+click 113 136
+wait 150
+# Installation options: Proceed
+click 113 136
+wait 200
+# Build variant: select "68040 with FPU", Proceed
+click 93 92
+wait 100
+click 113 136
+wait 200
+# Plug-ins drawer (askdir): Proceed
+click 80 117
+wait 200
+# Plugin selection: Proceed
+click 113 136
+wait 300
+# Install documentation? Yes
+click 113 136
+wait 200
+# Documentation drawer (askdir): Proceed
+click 80 117
+wait 300
+# Installation complete: Proceed
+log final
+click 224 149
+wait 200
+windows

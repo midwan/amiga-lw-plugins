@@ -17,29 +17,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build SDK and plugins
-        run: make all
+      - name: Build plugins and release package
+        run: make -j4 package
 
-      - name: List build artifacts
-        run: ls -la build/*.p
-
-      - name: Prepare release files
+      - name: List release package
         run: |
-          mkdir -p dist
-          cp build/*.p dist/
-          for dir in src/*/; do
-            plugin=$(basename "$dir")
-            if [ -f "$dir/README.md" ]; then
-              cp "$dir/README.md" "dist/${plugin}_README.md"
-            fi
-          done
-          ls -la dist/
+          ls -la build/LW-Plugins-*.lha
+          lha l build/LW-Plugins-*.lha
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: amiga-lw-plugins
-          path: dist/*
+          path: build/LW-Plugins-*.lha
 
   release:
     needs: build

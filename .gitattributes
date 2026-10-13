@@ -1,0 +1,8 @@
+# Files shipped to AmigaOS must keep LF line endings (CR breaks Installer
+# and AmigaDOS script arguments).
+package/Install text eol=lf
+package/latin1.sed text eol=lf
+tools/amiberry/Startup text eol=lf
+tools/amiberry/*.later text eol=lf
+tools/amiberry/*.poke text eol=lf
+*.info binary

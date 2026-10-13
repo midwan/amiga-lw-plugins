@@ -9,6 +9,7 @@
 - **Key linker flags**: `-noixemul -nostartfiles $(CPUFLAGS)`
 - **Required link libraries**: `-lm -lgcc` (math and GCC runtime)
 - **FPU variants**: `make fpu` (or `020fpu`/`040fpu`/`060fpu`) builds into `build-<variant>/` with its own `sdklib/`
+- **Release package**: `make package` → `build/LW-Plugins-<version>.lha` (Generic + FPU builds, Commodore Installer script `package/Install`, Latin-1 docs). `package/Install` must stay LF (`.gitattributes`). `(database "fpu")` returns `unknown` on the OS 3.1 Installer, so FPU builds are preselected only when an FPU is reported
 
 ### FPU variant notes
 
