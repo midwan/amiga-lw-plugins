@@ -14,11 +14,12 @@ SDK_SRC  = sdk/source
 SDK_LIB  = sdk/lib
 
 SRC      = src
+CPUFLAGS = -m68020
 BUILD    = build
 PVER     = $(shell cat VERSION)
 
-CFLAGS   = -noixemul -m68020 -O2 -Wall -I$(SDK_INC) -DPLUGIN_VERSION=\"$(PVER)\"
-LDFLAGS  = -noixemul -nostartfiles -m68020
+CFLAGS   = -noixemul $(CPUFLAGS) -O2 -Wall -I$(SDK_INC) -DPLUGIN_VERSION=\"$(PVER)\"
+LDFLAGS  = -noixemul -nostartfiles $(CPUFLAGS)
 LIBS     = $(SDK_LIB)/server.a -lm -lgcc
 
 STARTUP  = $(SDK_LIB)/serv_gcc.o
@@ -35,7 +36,7 @@ $(SDK_LIB):
 	mkdir -p $(SDK_LIB)
 
 $(BUILD)/serv_gcc.o: $(SDK_SRC)/serv_gcc.s | $(BUILD)
-	$(AS) -m68020 -o $@ $<
+	$(AS) $(filter -m680%,$(CPUFLAGS)) -o $@ $<
 
 $(BUILD)/slib%.o: $(SDK_SRC)/slib%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -153,7 +154,23 @@ toon: $(BUILD)/toon.p
 
 all: sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
 
+# ---- FPU variants ----
+# Each variant is a full `all` build with its own CPU flags, build directory
+# and SDK library (build-<variant>/). 020fpu targets 68020/68030 + 68881/68882.
+# 040fpu/060fpu emit fd*/fs* instructions that only the 68040/68060 on-chip
+# FPU implements, so they must not be used with a 68881/68882.
+FPU_VARIANTS    = 020fpu 040fpu 060fpu
+CPUFLAGS_020fpu = -m68020 -m68881
+CPUFLAGS_040fpu = -m68040 -m68881
+CPUFLAGS_060fpu = -m68060 -m68881
+
+fpu: $(FPU_VARIANTS)
+
+$(FPU_VARIANTS):
+	$(MAKE) all CPUFLAGS="$(CPUFLAGS_$@)" BUILD=build-$@ SDK_LIB=build-$@/sdklib
+
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
+	rm -rf $(addprefix build-,$(FPU_VARIANTS))
 
-.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean
+.PHONY: all sdk objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon clean fpu $(FPU_VARIANTS)
