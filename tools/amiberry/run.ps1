@@ -43,7 +43,11 @@ try {
     }
     if ($found -and ((Get-Date) - $found).TotalSeconds -ge $AfterMarkerSec) { break }
   }
+  if (-not $found -and (Test-Path $Log) -and (Select-String -Path $Log -SimpleMatch $Marker -Quiet)) {
+    $found = Get-Date; "marker found at end of run"
+  }
   if (-not $found) { "TIMEOUT without marker" }
 } finally {
   if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
 }
+if (-not $found) { exit 1 }
