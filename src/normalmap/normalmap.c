@@ -519,7 +519,7 @@ static void axis_normal(int axis, const double rgb[3], int flipY, double sign, d
 
 static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 {
-	double wx, wy, wz, total, strength, sign;
+	double wx, wy, wz, total, strength;
 	const double *normal = inst->scratch.objectGeomNormal;
 
 	if (!inst->map[NMAP_SLOT_NORMAL].data || !inst->strength) return;
@@ -540,12 +540,37 @@ static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 		inst->scratch.objectNormal[2] = (wz * inst->scratch.sample[0][2] + wy * inst->scratch.sample[1][2] + wx * inst->scratch.sample[2][2]) / total;
 	} else {
 		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], inst->projection, sa->oPos, inst->scratch.sample[0]);
-		sign = inst->projection == NMAP_PROJ_XZ ? normal[1] :
-			inst->projection == NMAP_PROJ_YZ ? normal[0] : normal[2];
-		axis_normal(inst->projection, inst->scratch.sample[0], inst->flipY, sign < 0.0 ? -1.0 : 1.0, inst->scratch.objectNormal);
+		inst->scratch.objectNormal[0] = inst->scratch.sample[0][0] * 2.0 - 1.0;
+		inst->scratch.objectNormal[1] = inst->scratch.sample[0][1] * 2.0 - 1.0;
+		inst->scratch.objectNormal[2] = inst->scratch.sample[0][2];
+		if (inst->flipY) inst->scratch.objectNormal[1] = -inst->scratch.objectNormal[1];
+		if (inst->scratch.objectNormal[2] < 0.01) inst->scratch.objectNormal[2] = 0.01;
+		/* Planar projection retains the original normal-relative tangent
+		 * frame so it can perturb curved or off-axis surface geometry. */
+		if (sa->wNorm[0] > 0.9 || sa->wNorm[0] < -0.9) {
+			inst->scratch.sample[1][0] = -sa->wNorm[2];
+			inst->scratch.sample[1][1] = 0.0;
+			inst->scratch.sample[1][2] = sa->wNorm[0];
+		} else {
+			inst->scratch.sample[1][0] = 0.0;
+			inst->scratch.sample[1][1] = sa->wNorm[2];
+			inst->scratch.sample[1][2] = -sa->wNorm[1];
+		}
+		vec_normalize(inst->scratch.sample[1]);
+		inst->scratch.sample[2][0] = sa->wNorm[1] * inst->scratch.sample[1][2] - sa->wNorm[2] * inst->scratch.sample[1][1];
+		inst->scratch.sample[2][1] = sa->wNorm[2] * inst->scratch.sample[1][0] - sa->wNorm[0] * inst->scratch.sample[1][2];
+		inst->scratch.sample[2][2] = sa->wNorm[0] * inst->scratch.sample[1][1] - sa->wNorm[1] * inst->scratch.sample[1][0];
+		vec_normalize(inst->scratch.sample[2]);
+		inst->scratch.worldNormal[0] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][0] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][0] + inst->scratch.objectNormal[2] * sa->wNorm[0];
+		inst->scratch.worldNormal[1] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][1] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][1] + inst->scratch.objectNormal[2] * sa->wNorm[1];
+		inst->scratch.worldNormal[2] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][2] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][2] + inst->scratch.objectNormal[2] * sa->wNorm[2];
 	}
-	object_to_world(sa, inst->scratch.objectNormal, inst->scratch.worldNormal);
-	vec_normalize(inst->scratch.worldNormal);
+	if (inst->projection == NMAP_PROJ_BOX) {
+		object_to_world(sa, inst->scratch.objectNormal, inst->scratch.worldNormal);
+		vec_normalize(inst->scratch.worldNormal);
+	} else {
+		vec_normalize(inst->scratch.worldNormal);
+	}
 	strength = inst->strength / 100.0;
 	sa->wNorm[0] = sa->wNorm[0] * (1.0 - strength) + inst->scratch.worldNormal[0] * strength;
 	sa->wNorm[1] = sa->wNorm[1] * (1.0 - strength) + inst->scratch.worldNormal[1] * strength;
