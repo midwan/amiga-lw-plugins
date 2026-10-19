@@ -180,11 +180,13 @@ same_id(const unsigned char *p, const char *id)
 static void
 set_surface_defaults(SurfaceParams *params)
 {
-	params->color[0] = params->color[1] = params->color[2] = 0.0;
-	params->luminous = params->diffuse = params->specular = 0.0;
+	/* LightWave surface defaults when a sub-chunk is absent */
+	params->color[0] = params->color[1] = params->color[2] = 200.0 / 255.0;
+	params->luminous = params->specular = 0.0;
 	params->mirror = params->transparency = 0.0;
+	params->diffuse = 1.0;
 	params->eta = 1.0;
-	params->roughness = 1.0;
+	params->roughness = 1.0 / 16.0;
 }
 
 static void
