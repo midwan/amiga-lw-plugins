@@ -56,6 +56,7 @@ typedef struct {
 static MessageFuncs *msg;
 static char uiPath[MAX_PATH];
 static char uiStatus[80];
+static const char *uiLines[2];
 
 
 static void *
@@ -576,12 +577,9 @@ Interface(long version, GlobalFunc *global, SurfListInst *inst, void *serverData
 	panl->globalFun = global;
 	pathCtl = FILE_CTL(panl, pan, "List file", 300);
 	status_text(inst, uiStatus, sizeof(uiStatus));
-	{
-		const char *lines[2];
-		lines[0] = uiStatus;
-		lines[1] = 0;
-		infoCtl = TEXT_CTL(panl, pan, "", lines);
-	}
+	uiLines[0] = uiStatus;
+	uiLines[1] = 0;
+	infoCtl = TEXT_CTL(panl, pan, "", uiLines);
 	(void)infoCtl;
 	strcpy(uiPath, inst->listPath);
 	SET_STR(pathCtl, uiPath, sizeof(uiPath));
@@ -590,8 +588,10 @@ Interface(long version, GlobalFunc *global, SurfListInst *inst, void *serverData
 		if (strcmp(uiPath, inst->listPath) != 0) {
 			strcpy(inst->listPath, uiPath);
 			inst->loaded = 0;
-			load_list(inst);
 		}
+		/* retry an unchanged path whose previous load failed */
+		if (!inst->loaded || inst->errors)
+			load_list(inst);
 	}
 	PAN_KILL(panl, pan);
 	return AFUNC_OK;
