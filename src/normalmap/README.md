@@ -22,8 +22,8 @@ NormalMap projects a normal map and optional PBR-style material maps from object
 |---|---:|---:|---|
 | Normal image | Image list / None | None | Tangent-space normal map. |
 | Albedo / Colour | Image list / None | None | RGB base colour map. Replace blends toward the map; Multiply scales the existing surface colour. |
-| Roughness | Image list / None | None | Sets `ShaderAccess.roughness` from the map luminance. |
-| Metallic | Image list / None | None | Uses map luminance to raise mirror and specular, and reduce diffuse, matching the PBR shader's metallic treatment. |
+| Roughness | Image list / None | None | Sets the normalized `ShaderAccess.roughness` value from map luminance: black is glossy/sharp and white is rough/broad. |
+| Metallic | Image list / None | None | Uses map luminance with the same Schlick-angle scalar treatment as PBR: it raises mirror and specular and reduces diffuse. |
 | Ambient occlusion | Image list / None | None | Darkens surface colour and diffuse by map luminance. White is unoccluded. |
 | Specular | Image list / None | None | Sets `ShaderAccess.specular` from map luminance. |
 | Projection | XY / XZ / YZ / Triplanar (box) | XY | Common projection for all slots. |
@@ -47,7 +47,7 @@ There are no UVs, projection offsets, or separate per-map transforms. This is de
 
 NormalMap changes its requested shader attributes only when the corresponding map slot is enabled: normal, colour, roughness, mirror/diffuse/specular, AO colour/diffuse, and specular. Put it before shaders that should use its perturbed normal or material attributes.
 
-The included PBR shader has its own procedural roughness, metallic, and AO settings. Do not enable both plugins' controls for the same property unless their combined effect is wanted. NormalMap's metallic map follows PBR's scalar LightWave 5 treatment: it raises the scalar mirror/specular values and reduces diffuse. LightWave 5 exposes no independent RGB specular colour in `ShaderAccess`; use the Albedo map to supply the material colour associated with a metal.
+The included PBR shader has its own procedural roughness, metallic, and AO settings. Do not enable both plugins' controls for the same property unless their combined effect is wanted. NormalMap's metallic map uses PBR's scalar Schlick-angle treatment before it raises mirror/specular and reduces diffuse. LightWave 5 exposes no independent RGB specular colour in `ShaderAccess`; use the Albedo map to supply the material colour associated with a metal.
 
 ## Persistence and compatibility
 
