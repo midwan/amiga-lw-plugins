@@ -264,6 +264,8 @@ parse_float(const char *s, float *out)
 			v /= pow10_tab[-exp10];
 	}
 
+	if (v > 3.40282347e38)
+		return 0;           /* does not fit a float */
 	*out = (float)(neg ? -v : v);
 	return 1;
 }
@@ -293,14 +295,29 @@ ffp_to_float(unsigned long ffp)
  * Typed reads for both formats
  * ---------------------------------------------------------------- */
 
-/* Binary big-endian word. Returns 0 at end of file. */
+static int
+fail(GeoReader *r, const char *msg)
+{
+	if (!r->error)
+		r->error = msg;
+	return 0;
+}
+
+/*
+ * Binary big-endian word. Returns 1 on success, 0 at end of file, and -1
+ * when the file ends after the first byte.
+ */
 static int
 read_word(GeoReader *r, unsigned long *out)
 {
 	int hi, lo;
 
-	if ((hi = next_byte(r)) < 0) return 0;
-	if ((lo = next_byte(r)) < 0) return 0;
+	if ((hi = next_byte(r)) < 0)
+		return 0;
+	if ((lo = next_byte(r)) < 0) {
+		fail(r, "File ends in the middle of a value.");
+		return -1;
+	}
 	*out = ((unsigned long)hi << 8) | (unsigned long)lo;
 	return 1;
 }
@@ -317,10 +334,10 @@ read_int(GeoReader *r, long *out, int *hex)
 
 	*hex = 0;
 	if (r->binary) {
-		if (!read_word(r, &w))
-			return 0;
-		*out = (long)w;
-		return 1;
+		n = read_word(r, &w);
+		if (n == 1)
+			*out = (long)w;
+		return n;
 	}
 	n = read_token(r);
 	if (n == 0)
@@ -337,7 +354,7 @@ read_coord(GeoReader *r, float *out)
 	int n;
 
 	if (r->binary) {
-		if (!read_word(r, &hi) || !read_word(r, &lo))
+		if (read_word(r, &hi) != 1 || read_word(r, &lo) != 1)
 			return 0;
 		*out = ffp_to_float((hi << 16) | lo);
 		return 1;
@@ -562,9 +579,9 @@ send_surface(GeoReader *r, const SurfParams *sp)
 	p = put_short(p, "REFL", sp->refl);
 	p = put_short(p, "TRAN", sp->tran);
 	if (sp->flags & SF_SMOOTHING) {
-		/* SMAN 89.5 degrees, IEEE single 0x42B30000 */
+		/* SMAN holds radians: 89.5 degrees = 1.56207, IEEE 0x3FC7F1E6 */
 		p = put_sub(p, "SMAN", 4);
-		p[0] = 0x42; p[1] = 0xB3; p[2] = 0; p[3] = 0;
+		p[0] = 0x3F; p[1] = 0xC7; p[2] = 0xF1; p[3] = 0xE6;
 		p += 4;
 	}
 
@@ -598,14 +615,6 @@ surface_for(GeoReader *r, long code, int hex)
 /* ----------------------------------------------------------------
  * Mesh transfer
  * ---------------------------------------------------------------- */
-
-static int
-fail(GeoReader *r, const char *msg)
-{
-	if (!r->error)
-		r->error = msg;
-	return 0;
-}
 
 /*
  * The interface allows several points per points() call, but Modeler
@@ -644,6 +653,8 @@ read_polygon(GeoReader *r, int detail)
 	long nv, v, color, ndetail;
 	int i, rc, hex, si;
 
+	if (r->aborted)
+		return 0;
 	rc = read_int(r, &nv, &hex);
 	if (rc == 0) {
 		if (detail)
@@ -706,7 +717,7 @@ read_mesh(GeoReader *r)
 	int rc, hex;
 
 	if (r->binary) {
-		if (!read_word(r, &w))
+		if (read_word(r, &w) != 1)
 			return fail(r, "File ends before the point count.");
 		n = (long)w;
 	} else {
@@ -724,8 +735,6 @@ read_mesh(GeoReader *r)
 		return 0;
 
 	for (;;) {
-		if (r->aborted)
-			return 0;
 		rc = read_polygon(r, 0);
 		if (rc < 0)
 			break;

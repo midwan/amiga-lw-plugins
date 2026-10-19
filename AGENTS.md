@@ -323,10 +323,15 @@ Observed with LightwaveRTG (Modeler 5.00f, Layout 5.00r) in Amiberry (`geoimport
   sort before it (`GEO(.geo)`).
 - `surfIndex()` sets `*firstTime`; send `surfData()` only then. `surfData()`
   takes the LWOB `SURF` sub-chunks without the name (COLR, FLAG, LUMI, DIFF,
-  SPEC, GLOS, REFL, TRAN, SMAN); Modeler saves them unchanged.
+  SPEC, GLOS, REFL, TRAN, SMAN); Modeler saves them unchanged. `SMAN` is in
+  radians (89.5 degrees = `0x3FC7F1E6`), although `FormatLWOB.TXT` says
+  degrees; the shipped LWOB objects all store radians.
 - `polygon()` with `OBJPOLF_DETAIL` attaches the polygon to the last
   top-level polygon; saved LWOB files carry them as detail polygons.
 - Modeler passes a `Monitor`.
+- On failure after `begin()`, set `result` and return without `done()`, as
+  the 5.x plug-in doc allows: the target layer stays empty and later loads
+  work normally.
 - Layout reads `.geo` (`3DG1`/`3DB1`) itself and never calls object loaders
   for them.
 - Modeler's ARexx `LOAD()` goes through the object loaders; a loader failure
