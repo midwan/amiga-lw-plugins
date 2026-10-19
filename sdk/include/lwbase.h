@@ -39,6 +39,7 @@ typedef struct st_ObjectImport {
 #define OBJSTAT_BADFILE  2
 #define OBJSTAT_ABORTED  3
 #define OBJSTAT_FAILED   99
+struct st_FileReq_Local;
 typedef int             FileActivateFunc (int version,
 				struct st_FileReq_Local *);
 typedef int             FileReqFunc (const char *hail, char *name,

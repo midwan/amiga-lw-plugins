@@ -2,7 +2,7 @@
 
 LightWave 3D 5.x plugins for AmigaOS, cross-compiled with GCC.
 
-This repository contains Layout and rendering plugins built as AmigaOS
+This repository contains Layout, rendering and Modeler plugins built as AmigaOS
 LoadSeg-able `.p` modules. Release notes and version-specific changes belong
 in GitHub Releases; this README documents the current project layout, build
 workflow, and plugin set.
@@ -21,6 +21,7 @@ workflow, and plugin set.
 | NormalMap | Shader | `normalmap.p` | [README](src/normalmap/README.md) |
 | Motion | Item motion | `motion.p` | [README](src/motion/README.md) |
 | Toon | Image filter | `toon.p` | [README](src/toon/README.md) |
+| GEOimport | Object loader (VideoScape `.geo`) | `geoimport.p` | [README](src/geoimport/README.md) |
 
 ## Installation
 
@@ -32,11 +33,12 @@ Most users should install a published release rather than build from source.
 2. Run the `Install` icon in the `LW-Plugins` drawer (needs the Commodore
    Installer). It detects the CPU and FPU, preselects the matching build,
    and copies the plugins you choose into your LightWave plug-ins drawer,
-   plus optional documentation.
+   GEOimport into the Modeler plug-ins drawer, plus optional documentation.
 3. Start Layout without loading a scene or object.
 4. Open the Options tab, choose **Add Plug-Ins**, and select the copied
    `.p` file.
 5. Restart Layout so LightWave writes the plugin entry to its config file.
+   GEOimport is registered the same way in Modeler.
 
 The archive holds four builds of every plugin under `LW-Plugins/Plugins/`.
 To install by hand, copy the `.p` files from the drawer matching your CPU:
@@ -77,6 +79,7 @@ Build a single plugin:
 ./build.sh normalmap
 ./build.sh motion
 ./build.sh toon
+./build.sh geoimport
 ```
 
 Clean generated objects and plugin binaries:
@@ -147,5 +150,6 @@ library patched for GCC compatibility:
     |-- pngloader/
     |-- normalmap/
     |-- motion/
-    `-- toon/
+    |-- toon/
+    `-- geoimport/
 ```
