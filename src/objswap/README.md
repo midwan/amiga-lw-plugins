@@ -43,7 +43,7 @@ The plugin looks for files named `basename_N` where:
 
 ## Installation
 
-1. Copy `objswap.p` to your LightWave plugins directory
+1. Run `Install` from the `LW-Plugins` release archive, or copy `objswap.p` from the archive's `Plugins/` drawer that matches your CPU (`Generic`, `020fpu`, `040fpu` or `060fpu`) to your LightWave plugins directory
 2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
 3. Navigate to the directory you copied the plugin and select it.
 4. Restart Layout so that the configuration file get updated with the new plug-in entry.

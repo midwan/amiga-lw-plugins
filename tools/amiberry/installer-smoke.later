@@ -1,0 +1,6 @@
+Wait 10
+Echo >>LWTest:log "launch"
+Run >NIL: LWTest:zzpoke "LWTest:LW-Plugins" LWTest:poke LWTest:poke.log
+CD LWTest:LW-Plugins
+LWTest:Installer LWTest:LW-Plugins/Install APPNAME "LightWave Plugins" MINUSER AVERAGE DEFUSER AVERAGE LOGFILE LWTest:install.log
+Echo >>LWTest:log "installer rc=$RC"

@@ -1,0 +1,2 @@
+Echo >LWTest:log "start"
+Run >NIL: Execute LWTest:Later

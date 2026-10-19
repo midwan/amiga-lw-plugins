@@ -5,9 +5,26 @@
 - **Docker image**: `sacredbanana/amiga-compiler:m68k-amigaos`
 - **Compiler**: `m68k-amigaos-gcc` 6.5.0b (GCC cross-compiler for m68k AmigaOS)
 - **Build wrapper**: `./build.sh` runs `make` inside Docker, mounting the project at `/work`
-- **Key compiler flags**: `-noixemul -m68020 -O2 -Wall`
-- **Key linker flags**: `-noixemul -nostartfiles -m68020`
+- **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall` (`CPUFLAGS` defaults to `-m68020`, soft-float)
+- **Key linker flags**: `-noixemul -nostartfiles $(CPUFLAGS)`
 - **Required link libraries**: `-lm -lgcc` (math and GCC runtime)
+- **FPU variants**: `make fpu` (or `020fpu`/`040fpu`/`060fpu`) builds into `build-<variant>/` with its own `sdklib/`
+- **Release package**: `make package` → `build/LW-Plugins-<version>.lha` (Generic + FPU builds, Commodore Installer script `package/Install`, Latin-1 docs). `package/Install` must stay LF (`.gitattributes`). `(database "fpu")` returns `unknown` on the OS 3.1 Installer, so FPU builds are preselected only when an FPU is reported
+
+### FPU variant notes
+
+- With `-m68881`, GCC returns `float`/`double` in `fp0` instead of `d0/d1`. Arguments are still
+  passed on the stack, so host callbacks are ABI-compatible as long as their `double` return
+  value is not used. No plugin currently consumes one (`pbr.c` ignores the `rayTrace` result).
+  Verify the LightWave host convention before using a `double` return from `rayTrace`,
+  `rayCast`, `rayShade`, `LWCameraInfo`, `LWFogInfo`, etc. in an FPU build.
+- The libnix driver links all three variants against `libm020/libm881`. Its `sin`/`sqrt` call
+  `mathieeedoubtrans.library` and return in `fp0`, so `slib4.c` must still open the math
+  libraries in FPU builds (the `motion` plugin needs this).
+- `020fpu` emits `fmovecr`/`fintrz` (68881/68882 only; trapped and emulated on 040/060).
+  `040fpu`/`060fpu` emit `fd*`/`fs*` (040/060 FPU only). `060fpu` may emit `fintrz`.
+- FPU code saves `fp2`–`fp7` (12 bytes each) in function prologues; keep this in mind for the
+  callback stack budget below.
 
 ### Docker container paths
 
