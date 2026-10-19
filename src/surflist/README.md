@@ -52,7 +52,8 @@ and applies:
 - mirror reflection
 - transparency
 - refraction index
-- roughness, derived from the file's glossiness
+- roughness, the reciprocal of the file's glossiness (`ShaderAccess.roughness`
+  is `1 / glossiness`, verified against the value LightWave itself passes in)
 
 It supports the fixed-point and floating-point variants of the five percentage
 values (`LUMI`/`VLUM`, `DIFF`/`VDIF`, `SPEC`/`VSPC`, `REFL`/`VRFL`, and

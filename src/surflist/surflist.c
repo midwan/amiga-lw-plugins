@@ -55,6 +55,7 @@ typedef struct {
 
 static MessageFuncs *msg;
 static char uiPath[MAX_PATH];
+static char uiStatus[80];
 
 
 static void *
@@ -232,9 +233,10 @@ parse_surface_chunk(const unsigned char *data, unsigned long length,
 		} else if (same_id(data + pos, "VTRN") && size >= 4) {
 			params->transparency = float_be(value);
 		} else if (same_id(data + pos, "GLOS") && size >= 2) {
-			params->roughness = 1.0 - be16(value) / 1024.0;
-			if (params->roughness < 0.0) params->roughness = 0.0;
-			if (params->roughness > 1.0) params->roughness = 1.0;
+			unsigned int gloss = be16(value);
+			/* ShaderAccess.roughness is the reciprocal of glossiness */
+			if (gloss >= 1)
+				params->roughness = 1.0 / (double)gloss;
 		} else if (same_id(data + pos, "RIND") && size >= 4) {
 			params->eta = float_be(value);
 		}
@@ -260,8 +262,10 @@ load_surface(const char *path, SurfaceParams *params)
 	pos = 12;
 	while (pos + 8 <= size) {
 		unsigned long chunkSize = be32(data + pos + 4);
-		unsigned long next = pos + 8 + chunkSize;
-		if (next > size) break;
+		unsigned long next;
+		if (chunkSize > size - pos - 8)
+			break;
+		next = pos + 8 + chunkSize;
 		if (same_id(data + pos, "SURF")) {
 			parse_surface_chunk(data + pos + 8, chunkSize, params);
 			found = 1;
@@ -559,7 +563,6 @@ Interface(long version, GlobalFunc *global, SurfListInst *inst, void *serverData
 	LWPanelFuncs *panl;
 	LWPanelID pan;
 	LWControl *pathCtl, *infoCtl;
-	char info[80];
 	static LWPanControlDesc desc;
 	static LWValue sval = { LWT_STRING };
 	XCALL_INIT;
@@ -569,11 +572,13 @@ Interface(long version, GlobalFunc *global, SurfListInst *inst, void *serverData
 	if (!panl) return AFUNC_BADGLOBAL;
 	pan = PAN_CREATE(panl, "SurfList v" PLUGIN_VERSION);
 	if (!pan) return AFUNC_BADGLOBAL;
+	/* the file control needs this to reach the file requester */
+	panl->globalFun = global;
 	pathCtl = FILE_CTL(panl, pan, "List file", 300);
-	status_text(inst, info, sizeof(info));
+	status_text(inst, uiStatus, sizeof(uiStatus));
 	{
 		const char *lines[2];
-		lines[0] = info;
+		lines[0] = uiStatus;
 		lines[1] = 0;
 		infoCtl = TEXT_CTL(panl, pan, "", lines);
 	}
