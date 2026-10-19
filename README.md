@@ -12,6 +12,7 @@ workflow, and plugin set.
 | Plugin | Class | Output | Documentation |
 |---|---|---|---|
 | ObjSwap | Object replacement | `objswap.p` | [README](src/objswap/README.md) |
+| ObjList | List-driven object replacement | `objlist2.p` | [README](src/objlist/README.md) |
 | ObjMeshSwap | Surface-preserving object replacement | `objmeshswap.p` | [README](src/objmeshswap/README.md) |
 | Fresnel | Shader | `fresnel.p` | [README](src/fresnel/README.md) |
 | PBR | Shader | `pbr.p` | [README](src/pbr/README.md) |
@@ -70,6 +71,7 @@ Build a single plugin:
 
 ```bash
 ./build.sh objswap
+./build.sh objlist
 ./build.sh objmeshswap
 ./build.sh fresnel
 ./build.sh pbr
@@ -142,6 +144,7 @@ library patched for GCC compatibility:
 |   `-- source/
 `-- src/
     |-- objswap/
+    |-- objlist/
     |-- objmeshswap/
     |-- fresnel/
     |-- pbr/
