@@ -390,7 +390,18 @@ XCALL_(static void) Cleanup(NormalMapInst *inst)
 	for (i = 0; i < NMAP_SLOT_COUNT; i++) clear_slot(&inst->map[i]);
 }
 
-XCALL_(static LWError) NewTime(NormalMapInst *inst, LWFrame f, LWTime t) { XCALL_INIT; return 0; }
+XCALL_(static LWError) NewTime(NormalMapInst *inst, LWFrame f, LWTime t)
+{
+	LWImageList *il;
+	int i;
+	XCALL_INIT;
+	il = gfunc ? (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT) : 0;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		clear_slot(&inst->map[i]);
+		load_slot(&inst->map[i], il);
+	}
+	return 0;
+}
 
 XCALL_(static unsigned int) Flags(NormalMapInst *inst)
 {
@@ -530,6 +541,17 @@ static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 		axis_normal(NMAP_PROJ_XY, inst->scratch.sample[0], inst->flipY, normal[2] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[0]);
 		axis_normal(NMAP_PROJ_XZ, inst->scratch.sample[1], inst->flipY, normal[1] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[1]);
 		axis_normal(NMAP_PROJ_YZ, inst->scratch.sample[2], inst->flipY, normal[0] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[2]);
+		/* Reorient each plane's perturbation around the pre-perturbation
+		 * surface normal. A neutral normal map must leave it unchanged. */
+		inst->scratch.sample[0][0] += normal[0];
+		inst->scratch.sample[0][1] += normal[1];
+		inst->scratch.sample[0][2] += normal[2] - (normal[2] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[1][0] += normal[0];
+		inst->scratch.sample[1][1] += normal[1] - (normal[1] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[1][2] += normal[2];
+		inst->scratch.sample[2][0] += normal[0] - (normal[0] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[2][1] += normal[1];
+		inst->scratch.sample[2][2] += normal[2];
 		wx = tri_weight(normal[0], inst->boxSharpness);
 		wy = tri_weight(normal[1], inst->boxSharpness);
 		wz = tri_weight(normal[2], inst->boxSharpness);
@@ -584,9 +606,8 @@ XCALL_(static void) Evaluate(NormalMapInst *inst, ShaderAccess *sa)
 	double value, amount, oneMinusCos, fresnel;
 
 	XCALL_INIT;
-	/* gNorm is world-space; use the supplied world-to-object matrix before
-	 * deriving triplanar weights and plane signs. */
-	world_to_object(sa, sa->gNorm, inst->scratch.objectGeomNormal);
+	/* Use the unperturbed smoothed surface normal for box weights. */
+	world_to_object(sa, sa->wNorm, inst->scratch.objectGeomNormal);
 	vec_normalize(inst->scratch.objectGeomNormal);
 	apply_normal(inst, sa);
 	if (inst->map[NMAP_SLOT_ALBEDO].data && inst->albedoAmount) {
@@ -672,7 +693,7 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	static LWPanControlDesc desc;
 	static LWValue ival = { LWT_INTEGER };
 	static const char *amountLabels[] = { "Albedo amount", "Roughness amount", "Metallic amount", "AO amount", "Specular amount" };
-	int count = 0, current[NMAP_SLOT_COUNT], i, value, *a;
+	int count = 0, current[NMAP_SLOT_COUNT], missing[NMAP_SLOT_COUNT], i, value, *a;
 
 	XCALL_INIT;
 	if (version != 1) return AFUNC_BADVERSION;
@@ -696,8 +717,12 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	items[count + 1] = 0;
 	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
 		current[i] = 0;
+		missing[i] = inst->map[i].imageID ? 1 : 0;
 		for (value = 0; value < count; value++)
-			if (ids[value] == inst->map[i].imageID) current[i] = value + 1;
+			if (ids[value] == inst->map[i].imageID) {
+				current[i] = value + 1;
+				missing[i] = 0;
+			}
 	}
 	pan = PAN_CREATE(panl, "Normal Map v" PLUGIN_VERSION);
 	if (!pan) return AFUNC_OK;
@@ -728,7 +753,7 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
 		for (i = 0; i < NMAP_SLOT_COUNT; i++) {
 			GET_INT(image[i], value);
-			select_popup_slot(inst, i, value, count, ids, items);
+			if (value || !missing[i]) select_popup_slot(inst, i, value, count, ids, items);
 		}
 		GET_INT(projection, inst->projection);
 		GET_INT(tileX, inst->tileX);
