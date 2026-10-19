@@ -74,7 +74,7 @@ outward).  Pure flat normals are encoded as RGB (128, 128, 255).
 The Normal Map shader pairs well with:
 - **Fresnel** — angle-dependent reflection now follows the perturbed normals
 - **PBR Shader** — metallic/roughness responds to normal-mapped detail
-- **LensFlare** — specular highlights from perturbed normals create more
+- **SpecFlare** — specular highlights from perturbed normals create more
   interesting flare patterns
 
 Apply Normal Map **before** other shaders in the stack so they see the
