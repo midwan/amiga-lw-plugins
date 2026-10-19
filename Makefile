@@ -161,7 +161,7 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon
+PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport
 
 all: sdk $(PLUGINS)
 

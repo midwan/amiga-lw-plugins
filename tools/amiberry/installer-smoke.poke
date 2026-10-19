@@ -21,6 +21,12 @@ wait 200
 # Plugin selection: Proceed
 click 113 136
 wait 300
+# Install GEOimport for Modeler? Yes
+click 113 136
+wait 200
+# Modeler plug-ins drawer (askdir): Proceed
+click 80 117
+wait 300
 # Install documentation? Yes
 click 113 136
 wait 200

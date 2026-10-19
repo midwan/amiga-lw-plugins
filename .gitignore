@@ -14,4 +14,3 @@ Thumbs.db
 sdk/lib/*.a
 sdk/lib/*.o
 *.tiff
-.sisyphus

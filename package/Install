@@ -118,6 +118,32 @@
 (set #bit 7 #file "pngloader.p") (P_Plugin)
 (set #bit 7 #file "pngsaver.p") (P_Plugin)
 
+; --------------------------------------------------------------------
+; GEOimport is an object loader for Modeler, so it goes into the Modeler
+; plug-ins drawer, by default the "Modeler" drawer next to #dest. It has
+; its own question because askoptions above is full.
+
+(set #moddest (tackon (pathonly #dest) "Modeler"))
+(if (NOT (exists #moddest (noreq)))
+	(set #moddest #dest))
+
+(if
+	(askbool
+		(prompt "Install GEOimport, the VideoScape 3D (.geo) object loader for Modeler?")
+		(help "GEOimport loads VideoScape 3D and Aegis Modeler 3D .geo objects into Modeler. It is installed into the Modeler plug-ins drawer.")
+		(default 1))
+	(
+		(set #moddest
+			(askdir
+				(prompt "Where should GEOimport be installed?")
+				(help "Choose the drawer that holds your LightWave Modeler plug-ins, for example Toaster:Programs/Plug-Ins/Modeler. An existing geoimport.p is replaced.")
+				(default #moddest)))
+		(copyfiles
+			(prompt "Install geoimport.p")
+			(help @copyfiles-help)
+			(source (tackon #srcdir "geoimport.p"))
+			(dest #moddest))))
+
 (complete 80)
 
 ; --------------------------------------------------------------------
@@ -149,4 +175,5 @@
 (exit
 	"The plugins are in " #dest ".\n\n"
 	"To register a new plugin, start Layout without loading a scene, open Options > Add Plug-ins, select the .p file, then restart Layout. "
+	"Register GEOimport the same way in Modeler (Add Plug-Ins in the Menu layout), then restart Modeler. "
 	"Plugins that are already registered under the same file name pick up the new build on the next start.")

@@ -310,6 +310,30 @@ Selection filters: `OPSEL_GLOBAL`, `OPSEL_USER`, `OPSEL_DIRECT`
 
 ---
 
+## Object loader details (`ObjectLoader`, `ObjectImport`)
+
+Observed with LightwaveRTG (Modeler 5.00f, Layout 5.00r) in Amiberry (`geoimport`):
+
+- **Send one point per `points()` call.** Modeler stores the first point of a
+  call for every point in it, so `points(data, 8, xyz)` gives eight copies of
+  `xyz[0..2]`.
+- **Loaders run in name order** (not config-file order), and Modeler stops at
+  the first loader that answers anything but `OBJSTAT_NOREC`. LightwaveRTG's
+  `Translator3D-Import` fails on files it does not handle, so a loader must
+  sort before it (`GEO(.geo)`).
+- `surfIndex()` sets `*firstTime`; send `surfData()` only then. `surfData()`
+  takes the LWOB `SURF` sub-chunks without the name (COLR, FLAG, LUMI, DIFF,
+  SPEC, GLOS, REFL, TRAN, SMAN); Modeler saves them unchanged.
+- `polygon()` with `OBJPOLF_DETAIL` attaches the polygon to the last
+  top-level polygon; saved LWOB files carry them as detail polygons.
+- Modeler passes a `Monitor`.
+- Layout reads `.geo` (`3DG1`/`3DB1`) itself and never calls object loaders
+  for them.
+- Modeler's ARexx `LOAD()` goes through the object loaders; a loader failure
+  makes `LOAD()` return an ARexx error (12) without a requester.
+
+---
+
 ## Config file registration
 
 Plugins are registered in LightWave's config file (e.g., `MOD-config` on Amiga):
