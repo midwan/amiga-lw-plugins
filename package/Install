@@ -92,7 +92,7 @@
 				"PBR (shader)"
 				"NormalMap (shader)"
 				"LensFlare (image filter)"
-				"Toon (image filter)"
+				"Toon + PostFilter (image filters)"
 				"Motion (item motion)"
 				"PNGloader + PNGsaver (image I/O)")
 			(default 255))))
@@ -114,6 +114,7 @@
 (set #bit 3 #file "normalmap.p") (P_Plugin)
 (set #bit 4 #file "lensflare.p") (P_Plugin)
 (set #bit 5 #file "toon.p") (P_Plugin)
+(set #bit 5 #file "postfilter.p") (P_Plugin)
 (set #bit 6 #file "motion.p") (P_Plugin)
 (set #bit 7 #file "pngloader.p") (P_Plugin)
 (set #bit 7 #file "pngsaver.p") (P_Plugin)

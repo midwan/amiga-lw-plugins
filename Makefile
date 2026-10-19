@@ -150,6 +150,15 @@ $(BUILD)/toon.p: $(BUILD)/toon.o sdk $(STUBS)
 
 toon: $(BUILD)/toon.p
 
+# PostFilter - configurable post-render image filter
+$(BUILD)/postfilter.o: $(SRC)/postfilter/postfilter.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/postfilter.p: $(BUILD)/postfilter.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+postfilter: $(BUILD)/postfilter.p
+
 # GeoImport - VideoScape GEO object loader
 $(BUILD)/geoimport.o: $(SRC)/geoimport/geoimport.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -161,7 +170,7 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport
+PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon postfilter geoimport
 
 all: sdk $(PLUGINS)
 
