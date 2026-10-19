@@ -29,16 +29,16 @@ Cast shadows therefore remain visible inside the cel shading.
 | Bands | 2–8 | 4 | Number of direct-lighting bands. |
 | Band Softness | 0–100 | 0 | Softens the transition at the top of each band. Zero gives hard cel bands. |
 | Outline | off/on | on | Enables silhouette darkening on the shaded surface. |
-| Edge Width | 1–100 | 12 | Width of the dark silhouette region as a view-angle threshold. |
+| Edge Width | 1–100 | 28 | Width of the dark silhouette region as a view-angle threshold. |
 | Use Geometric Normal | off/on | off | Uses unsmoothed polygon normals for the edge test. Enable it for faceted outlines. |
 | Edge Colour | RGB | black | Colour used for the silhouette region. |
 | Highlight | off/on | on | Enables the hard Blinn highlight. |
-| Highlight Size | 0–100 | 18 | Larger values lower the highlight threshold and make the spot larger. |
+| Highlight Size | 0–100 | 20 | Controls the angular size of the hard specular highlight spot. |
 | Highlight Intensity | 0–100 | 100 | Strength of the highlight colour. |
 | Highlight Colour | RGB | white | Colour of the hard highlight. |
 | Rim Amount | 0–100 | 0 | Adds an optional view-edge glow before outlines are applied. |
 | Rim Colour | RGB | pale blue | Colour of the rim light. |
-| Shadow Colour | RGB | blue-grey | Colour used for the unlit band. |
+| Shadow Colour | RGB | dark cool tint | Dark tint applied to the base colour for the unlit shadow band. |
 
 ## Notes
 
@@ -46,7 +46,7 @@ Cast shadows therefore remain visible inside the cel shading.
   mirror contributions for the affected surface, preventing it from relighting
   the already quantised result.
 - `illuminate()` includes light falloff, spotlight cones, transparent blockers
-  and cast shadows. A surface in shadow falls into the Shadow Colour band.
+  and cast shadows. A surface in shadow falls into the darkened shadow band.
 - The shader does not trace rays and only loops over the scene's lights. On
   classic 68k machines, its cost rises with the number of enabled lights.
 - It works on opaque surfaces. Do not apply it to a surface that depends on

@@ -155,13 +155,13 @@ init_defaults(ToonShaderInst *inst)
 	inst->bands = 4;
 	inst->softness = 0;
 	inst->outlineEnabled = 1;
-	inst->outlineWidth = 12;
+	inst->outlineWidth = 28;
 	inst->geometricOutline = 0;
 	inst->outlineR = 0;
 	inst->outlineG = 0;
 	inst->outlineB = 0;
 	inst->highlightEnabled = 1;
-	inst->highlightSize = 18;
+	inst->highlightSize = 20;
 	inst->highlightIntensity = 100;
 	inst->highlightR = 255;
 	inst->highlightG = 255;
@@ -170,11 +170,10 @@ init_defaults(ToonShaderInst *inst)
 	inst->rimR = 180;
 	inst->rimG = 210;
 	inst->rimB = 255;
-	inst->shadowR = 45;
+	inst->shadowR = 55;
 	inst->shadowG = 55;
-	inst->shadowB = 90;
+	inst->shadowB = 70;
 }
-
 static void
 clamp_settings(ToonShaderInst *inst)
 {
@@ -496,13 +495,17 @@ Evaluate(ToonShaderInst *inst, ShaderAccess *sa)
 		hueB = clamp01(lights->blue / lights->level);
 	} else hueR = hueG = hueB = 0.0;
 
-	outR = (inst->shadowR / 255.0) * (1.0 - band) + sa->color[0] * hueR * band;
-	outG = (inst->shadowG / 255.0) * (1.0 - band) + sa->color[1] * hueG * band;
-	outB = (inst->shadowB / 255.0) * (1.0 - band) + sa->color[2] * hueB * band;
+	double darkR = sa->color[0] * (inst->shadowR / 255.0);
+	double darkG = sa->color[1] * (inst->shadowG / 255.0);
+	double darkB = sa->color[2] * (inst->shadowB / 255.0);
 
-	vx = sa->wPos[0] - sa->raySource[0];
-	vy = sa->wPos[1] - sa->raySource[1];
-	vz = sa->wPos[2] - sa->raySource[2];
+	outR = darkR * (1.0 - band) + (sa->color[0] * hueR) * band;
+	outG = darkG * (1.0 - band) + (sa->color[1] * hueG) * band;
+	outB = darkB * (1.0 - band) + (sa->color[2] * hueB) * band;
+
+	vx = sa->raySource[0] - sa->wPos[0];
+	vy = sa->raySource[1] - sa->wPos[1];
+	vz = sa->raySource[2] - sa->wPos[2];
 	normalise3(&vx, &vy, &vz);
 	nx = sa->wNorm[0]; ny = sa->wNorm[1]; nz = sa->wNorm[2];
 	if (inst->geometricOutline) {
@@ -519,13 +522,15 @@ Evaluate(ToonShaderInst *inst, ShaderAccess *sa)
 		outG += rim * (inst->rimG / 255.0);
 		outB += rim * (inst->rimB / 255.0);
 	}
-	if (inst->highlightEnabled && inst->highlightIntensity > 0 &&
-		lights->highlight >= 0.98 - inst->highlightSize * 0.005) {
-		outR += (inst->highlightIntensity / 100.0) * (inst->highlightR / 255.0);
-		outG += (inst->highlightIntensity / 100.0) * (inst->highlightG / 255.0);
-		outB += (inst->highlightIntensity / 100.0) * (inst->highlightB / 255.0);
+	if (inst->highlightEnabled && inst->highlightIntensity > 0 && inst->highlightSize > 0) {
+		double thresh = 0.998 - (inst->highlightSize / 100.0) * 0.05;
+		if (lights->highlight >= thresh) {
+			double hl = (inst->highlightIntensity / 100.0);
+			outR += hl * (inst->highlightR / 255.0);
+			outG += hl * (inst->highlightG / 255.0);
+			outB += hl * (inst->highlightB / 255.0);
+		}
 	}
-
 	edge = inst->outlineWidth / 100.0;
 	if (inst->outlineEnabled && facing < edge) {
 		outR = inst->outlineR / 255.0;
