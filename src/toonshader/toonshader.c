@@ -37,6 +37,7 @@ typedef struct {
 	int shadowR, shadowG, shadowB;
 	LWItemInfo *itemInfo;
 	int itemInfoV2;
+	char ioBuf[128];
 } ToonShaderInst;
 
 typedef struct {
@@ -238,7 +239,7 @@ Copy(ToonShaderInst *from, ToonShaderInst *to)
 XCALL_(static LWError)
 Load(ToonShaderInst *inst, const LWLoadState *ls)
 {
-	char buf[128];
+	char *buf = inst->ioBuf;
 	const char *p;
 	int version;
 	XCALL_INIT;
@@ -299,7 +300,7 @@ Load(ToonShaderInst *inst, const LWLoadState *ls)
 XCALL_(static LWError)
 Save(ToonShaderInst *inst, const LWSaveState *ss)
 {
-	char buf[128];
+	char *buf = inst->ioBuf;
 	int pos = 0;
 	XCALL_INIT;
 
@@ -381,7 +382,7 @@ Flags(ToonShaderInst *inst)
 {
 	XCALL_INIT;
 	return LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_DIFFUSE |
-	       LWSHF_SPECULAR | LWSHF_MIRROR;
+	       LWSHF_SPECULAR | LWSHF_MIRROR | LWSHF_RAYTRACE;
 }
 
 /* illuminate() returns a shadowed, attenuated colour, so this preserves
@@ -436,7 +437,6 @@ sample_lights(ToonShaderInst *inst, ShaderAccess *sa, ToonLighting *result)
 	result->level = result->red;
 	if (result->green > result->level) result->level = result->green;
 	if (result->blue > result->level) result->level = result->blue;
-	result->level = clamp01(result->level);
 }
 
 static double
@@ -445,8 +445,8 @@ band_value(double level, int bands, int softness)
 	double scaled, fraction, base, transition;
 	int band;
 
-	if (bands < 2) return level;
-	scaled = clamp01(level) * (double)(bands - 1);
+	if (bands < 2) return clamp01(level);
+	scaled = clamp01(level) * (double)bands;
 	band = (int)scaled;
 	if (band >= bands - 1) return 1.0;
 	base = (double)band / (double)(bands - 1);
@@ -621,7 +621,8 @@ Activate(long version, GlobalFunc *global, void *local, void *serverData)
 	handler->newTime = (void *)NewTime;
 	handler->evaluate = (void *)Evaluate;
 	handler->flags = (void *)Flags;
-	handler->descln = (void *)DescLn;
+	if (version >= 2)
+		handler->descln = (void *)DescLn;
 
 	gfunc = global;
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
