@@ -22,6 +22,19 @@ extern double sqrt(double);
 #define TOONSHADER_VERSION 1
 
 typedef struct {
+	double red, green, blue;
+	double level;
+	double highlight;
+} ToonLighting;
+
+typedef struct {
+	ToonLighting lights;
+	double direction[3], lightColor[3];
+	double vx, vy, vz, nx, ny, nz;
+	double ndotl, intensity, halfx, halfy, halfz, ndoth;
+} ToonScratch;
+
+typedef struct {
 	int bands;
 	int softness;
 	int outlineEnabled;
@@ -36,15 +49,11 @@ typedef struct {
 	int rimR, rimG, rimB;
 	int shadowR, shadowG, shadowB;
 	LWItemInfo *itemInfo;
+	LWLightInfo *lightInfo;
 	int itemInfoV2;
 	char ioBuf[128];
+	ToonScratch scratch;
 } ToonShaderInst;
-
-typedef struct {
-	double red, green, blue;
-	double level;
-	double highlight;
-} ToonLighting;
 
 static GlobalFunc *gfunc;
 static MessageFuncs *msg;
@@ -230,8 +239,9 @@ Copy(ToonShaderInst *from, ToonShaderInst *to)
 {
 	XCALL_INIT;
 	*to = *from;
-	/* Item Info belongs to Init/Cleanup on each instance. */
+	/* Animation globals belong to Init/Cleanup on each instance. */
 	to->itemInfo = 0;
+	to->lightInfo = 0;
 	to->itemInfoV2 = 0;
 	return 0;
 }
@@ -350,11 +360,15 @@ Init(ToonShaderInst *inst)
 {
 	XCALL_INIT;
 	inst->itemInfo = 0;
+	inst->lightInfo = 0;
 	inst->itemInfoV2 = 0;
 	if (gfunc) {
 		inst->itemInfo = (LWItemInfo *)(*gfunc)("LW Item Info 2", GFUSE_ACQUIRE);
 		if (inst->itemInfo) inst->itemInfoV2 = 1;
 		else inst->itemInfo = (LWItemInfo *)(*gfunc)("LW Item Info", GFUSE_ACQUIRE);
+		/* Only LW Light Info 2 (LW 5.5+) has flags and range. The older
+		 * Light Info struct in LW 4.0/5.00r lacks flags and must not be used. */
+		inst->lightInfo = (LWLightInfo *)(*gfunc)("LW Light Info 2", GFUSE_ACQUIRE);
 	}
 	return 0;
 }
@@ -366,8 +380,12 @@ Cleanup(ToonShaderInst *inst)
 	if (inst->itemInfo && gfunc) {
 		(*gfunc)(inst->itemInfoV2 ? "LW Item Info 2" : "LW Item Info", GFUSE_RELEASE);
 		inst->itemInfo = 0;
-		inst->itemInfoV2 = 0;
 	}
+	if (inst->lightInfo && gfunc) {
+		(*gfunc)("LW Light Info 2", GFUSE_RELEASE);
+		inst->lightInfo = 0;
+	}
+	inst->itemInfoV2 = 0;
 }
 
 XCALL_(static LWError)
@@ -388,55 +406,58 @@ Flags(ToonShaderInst *inst)
 /* illuminate() returns a shadowed, attenuated colour, so this preserves
  * LightWave's cast shadows while replacing only the final light response. */
 static void
-sample_lights(ToonShaderInst *inst, ShaderAccess *sa, ToonLighting *result)
+sample_lights(ToonShaderInst *inst, ShaderAccess *sa)
 {
+	ToonScratch *s = &inst->scratch;
 	LWItemID light;
-	double direction[3], lightColor[3];
-	double vx, vy, vz, nx, ny, nz;
-	double ndotl, intensity, halfx, halfy, halfz, ndoth;
+	unsigned int lightFlags;
 
-	result->red = result->green = result->blue = 0.0;
-	result->level = result->highlight = 0.0;
+	s->lights.red = s->lights.green = s->lights.blue = 0.0;
+	s->lights.level = s->lights.highlight = 0.0;
 	if (!inst->itemInfo || !sa->illuminate) return;
 
-	vx = sa->raySource[0] - sa->wPos[0];
-	vy = sa->raySource[1] - sa->wPos[1];
-	vz = sa->raySource[2] - sa->wPos[2];
-	normalise3(&vx, &vy, &vz);
-	nx = sa->wNorm[0]; ny = sa->wNorm[1]; nz = sa->wNorm[2];
+	s->vx = sa->raySource[0] - sa->wPos[0];
+	s->vy = sa->raySource[1] - sa->wPos[1];
+	s->vz = sa->raySource[2] - sa->wPos[2];
+	normalise3(&s->vx, &s->vy, &s->vz);
+	s->nx = sa->wNorm[0]; s->ny = sa->wNorm[1]; s->nz = sa->wNorm[2];
 
 	light = (*inst->itemInfo->first)(LWI_LIGHT, LWITEM_NULL);
 	while (light) {
-		if ((*sa->illuminate)(light, sa->wPos, direction, lightColor)) {
-			normalise3(&direction[0], &direction[1], &direction[2]);
-			/* illuminate returns the incoming light ray, so turn it
-			 * into the point-to-light direction for N.L and Blinn. */
-			direction[0] = -direction[0];
-			direction[1] = -direction[1];
-			direction[2] = -direction[2];
-			ndotl = nx * direction[0] + ny * direction[1] + nz * direction[2];
-			if (ndotl > 0.0) {
-				result->red += lightColor[0] * ndotl;
-				result->green += lightColor[1] * ndotl;
-				result->blue += lightColor[2] * ndotl;
-				intensity = lightColor[0];
-				if (lightColor[1] > intensity) intensity = lightColor[1];
-				if (lightColor[2] > intensity) intensity = lightColor[2];
-				halfx = direction[0] + vx;
-				halfy = direction[1] + vy;
-				halfz = direction[2] + vz;
-				normalise3(&halfx, &halfy, &halfz);
-				ndoth = nx * halfx + ny * halfy + nz * halfz;
-				ndoth *= intensity;
-				if (ndoth > result->highlight)
-					result->highlight = ndoth;
+		lightFlags = inst->lightInfo ? (*inst->lightInfo->flags)(light) : 0;
+		if ((*sa->illuminate)(light, sa->wPos, s->direction, s->lightColor)) {
+			normalise3(&s->direction[0], &s->direction[1], &s->direction[2]);
+			s->direction[0] = -s->direction[0];
+			s->direction[1] = -s->direction[1];
+			s->direction[2] = -s->direction[2];
+			s->ndotl = s->nx * s->direction[0] + s->ny * s->direction[1] +
+				s->nz * s->direction[2];
+			if (s->ndotl > 0.0) {
+				s->intensity = s->lightColor[0];
+				if (s->lightColor[1] > s->intensity) s->intensity = s->lightColor[1];
+				if (s->lightColor[2] > s->intensity) s->intensity = s->lightColor[2];
+				if (!(lightFlags & LWLFL_NO_DIFFUSE)) {
+					s->lights.red += s->lightColor[0] * s->ndotl;
+					s->lights.green += s->lightColor[1] * s->ndotl;
+					s->lights.blue += s->lightColor[2] * s->ndotl;
+				}
+				if (!(lightFlags & LWLFL_NO_SPECULAR)) {
+					s->halfx = s->direction[0] + s->vx;
+					s->halfy = s->direction[1] + s->vy;
+					s->halfz = s->direction[2] + s->vz;
+					normalise3(&s->halfx, &s->halfy, &s->halfz);
+					s->ndoth = s->nx * s->halfx + s->ny * s->halfy + s->nz * s->halfz;
+					s->ndoth *= s->intensity;
+					if (s->ndoth > s->lights.highlight)
+						s->lights.highlight = s->ndoth;
+				}
 			}
 		}
 		light = (*inst->itemInfo->next)(light);
 	}
-	result->level = result->red;
-	if (result->green > result->level) result->level = result->green;
-	if (result->blue > result->level) result->level = result->blue;
+	s->lights.level = s->lights.red;
+	if (s->lights.green > s->lights.level) s->lights.level = s->lights.green;
+	if (s->lights.blue > s->lights.level) s->lights.level = s->lights.blue;
 }
 
 static double
@@ -461,18 +482,18 @@ band_value(double level, int bands, int softness)
 XCALL_(static void)
 Evaluate(ToonShaderInst *inst, ShaderAccess *sa)
 {
-	ToonLighting lights;
+	ToonLighting *lights = &inst->scratch.lights;
 	double band, hueR, hueG, hueB, outR, outG, outB;
 	double vx, vy, vz, facing, rim, edge;
 	double nx, ny, nz;
 	XCALL_INIT;
 
-	sample_lights(inst, sa, &lights);
-	band = band_value(lights.level, inst->bands, inst->softness);
-	if (lights.level > 0.00001) {
-		hueR = clamp01(lights.red / lights.level);
-		hueG = clamp01(lights.green / lights.level);
-		hueB = clamp01(lights.blue / lights.level);
+	sample_lights(inst, sa);
+	band = band_value(lights->level, inst->bands, inst->softness);
+	if (lights->level > 0.00001) {
+		hueR = clamp01(lights->red / lights->level);
+		hueG = clamp01(lights->green / lights->level);
+		hueB = clamp01(lights->blue / lights->level);
 	} else hueR = hueG = hueB = 0.0;
 
 	outR = (inst->shadowR / 255.0) * (1.0 - band) + sa->color[0] * hueR * band;
@@ -499,11 +520,10 @@ Evaluate(ToonShaderInst *inst, ShaderAccess *sa)
 		outB += rim * (inst->rimB / 255.0);
 	}
 	if (inst->highlightEnabled && inst->highlightIntensity > 0 &&
-		lights.highlight >= 0.98 - inst->highlightSize * 0.005) {
-		double highlight = inst->highlightIntensity / 100.0;
-		outR += highlight * (inst->highlightR / 255.0);
-		outG += highlight * (inst->highlightG / 255.0);
-		outB += highlight * (inst->highlightB / 255.0);
+		lights->highlight >= 0.98 - inst->highlightSize * 0.005) {
+		outR += (inst->highlightIntensity / 100.0) * (inst->highlightR / 255.0);
+		outG += (inst->highlightIntensity / 100.0) * (inst->highlightG / 255.0);
+		outB += (inst->highlightIntensity / 100.0) * (inst->highlightB / 255.0);
 	}
 
 	edge = inst->outlineWidth / 100.0;
