@@ -21,6 +21,7 @@ workflow, and plugin set.
 | NormalMap | Shader | `normalmap.p` | [README](src/normalmap/README.md) |
 | Motion | Item motion | `motion.p` | [README](src/motion/README.md) |
 | Toon | Image filter | `toon.p` | [README](src/toon/README.md) |
+| ToonShader | Shader | `toonshader.p` | [README](src/toonshader/README.md) |
 | GEOimport | Object loader (VideoScape `.geo`) | `geoimport.p` | [README](src/geoimport/README.md) |
 
 ## Installation
@@ -79,6 +80,7 @@ Build a single plugin:
 ./build.sh normalmap
 ./build.sh motion
 ./build.sh toon
+./build.sh toonshader
 ./build.sh geoimport
 ```
 
@@ -151,5 +153,6 @@ library patched for GCC compatibility:
     |-- normalmap/
     |-- motion/
     |-- toon/
+    |-- toonshader/
     `-- geoimport/
 ```
