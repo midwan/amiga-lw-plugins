@@ -97,6 +97,18 @@ typedef struct {
 } GeoReader;
 
 static int
+fail(GeoReader *r, const char *msg)
+{
+	if (!r->error)
+		r->error = msg;
+	return 0;
+}
+
+/*
+ * A DOS read error ends the input like end of file but also records an
+ * error, so read_mesh() fails instead of accepting a partial mesh.
+ */
+static int
 fill_buffer(GeoReader *r)
 {
 	if (r->eof)
@@ -104,6 +116,8 @@ fill_buffer(GeoReader *r)
 	r->len = Read(r->fh, r->buf, READ_BUF_SIZE);
 	r->pos = 0;
 	if (r->len <= 0) {
+		if (r->len < 0)
+			fail(r, "Error reading the file.");
 		r->len = 0;
 		r->eof = 1;
 		return 0;
@@ -294,14 +308,6 @@ ffp_to_float(unsigned long ffp)
 /* ----------------------------------------------------------------
  * Typed reads for both formats
  * ---------------------------------------------------------------- */
-
-static int
-fail(GeoReader *r, const char *msg)
-{
-	if (!r->error)
-		r->error = msg;
-	return 0;
-}
 
 /*
  * Binary big-endian word. Returns 1 on success, 0 at end of file, and -1
@@ -742,6 +748,8 @@ read_mesh(GeoReader *r)
 			return 0;
 	}
 
+	if (r->error)
+		return 0;           /* read error at a polygon boundary */
 	r->obj->done(r->obj->data);
 	return 1;
 }
