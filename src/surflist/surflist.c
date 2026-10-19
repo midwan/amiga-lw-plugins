@@ -339,6 +339,8 @@ parse_frame(const char *text, int *frame)
 	while (*text == ' ' || *text == '\t') text++;
 	if (*text == '-') { negative = 1; text++; }
 	while (*text >= '0' && *text <= '9') {
+		if (value > (2147483647 - (*text - '0')) / 10)
+			return 0;
 		value = value * 10 + (*text - '0');
 		text++;
 		digits++;
@@ -386,6 +388,8 @@ load_list(SurfListInst *inst)
 	free_entries(inst);
 	inst->errors = 0;
 	inst->loaded = 1;
+	/* no path selected: a valid, empty state, not an error */
+	if (!inst->listPath[0]) return;
 	if (!read_file(inst->listPath, MAX_LIST_BYTES, &data, &size)) {
 		inst->errors = 1;
 		return;
