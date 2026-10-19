@@ -14,6 +14,7 @@ workflow, and plugin set.
 | ObjSwap | Object replacement | `objswap.p` | [README](src/objswap/README.md) |
 | ObjMeshSwap | Surface-preserving object replacement | `objmeshswap.p` | [README](src/objmeshswap/README.md) |
 | Fresnel | Shader | `fresnel.p` | [README](src/fresnel/README.md) |
+| SurfList | Shader | `surflist.p` | [README](src/surflist/README.md) |
 | PBR | Shader | `pbr.p` | [README](src/pbr/README.md) |
 | LensFlare | Image filter | `lensflare.p` | [README](src/lensflare/README.md) |
 | PNGsaver | Image saver | `pngsaver.p` | [README](src/pngsaver/README.md) |
@@ -72,6 +73,7 @@ Build a single plugin:
 ./build.sh objswap
 ./build.sh objmeshswap
 ./build.sh fresnel
+./build.sh surflist
 ./build.sh pbr
 ./build.sh lensflare
 ./build.sh pngsaver
@@ -144,6 +146,7 @@ library patched for GCC compatibility:
     |-- objswap/
     |-- objmeshswap/
     |-- fresnel/
+    |-- surflist/
     |-- pbr/
     |-- lensflare/
     |-- pngsaver/
