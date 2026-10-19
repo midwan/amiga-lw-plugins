@@ -503,16 +503,16 @@ static double luma(const double rgb[3])
 
 static void object_to_world(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->oXfrm[0] * in[0] + sa->oXfrm[3] * in[1] + sa->oXfrm[6] * in[2];
-	out[1] = sa->oXfrm[1] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[7] * in[2];
-	out[2] = sa->oXfrm[2] * in[0] + sa->oXfrm[5] * in[1] + sa->oXfrm[8] * in[2];
+	out[0] = sa->oXfrm[0] * in[0] + sa->oXfrm[1] * in[1] + sa->oXfrm[2] * in[2];
+	out[1] = sa->oXfrm[3] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[5] * in[2];
+	out[2] = sa->oXfrm[6] * in[0] + sa->oXfrm[7] * in[1] + sa->oXfrm[8] * in[2];
 }
 
 static void world_to_object(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->wXfrm[0] * in[0] + sa->wXfrm[3] * in[1] + sa->wXfrm[6] * in[2];
-	out[1] = sa->wXfrm[1] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[7] * in[2];
-	out[2] = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
+	out[0] = sa->wXfrm[0] * in[0] + sa->wXfrm[1] * in[1] + sa->wXfrm[2] * in[2];
+	out[1] = sa->wXfrm[3] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[5] * in[2];
+	out[2] = sa->wXfrm[6] * in[0] + sa->wXfrm[7] * in[1] + sa->wXfrm[8] * in[2];
 }
 
 static void axis_normal(int axis, const double rgb[3], int flipY, double sign, double out[3])
@@ -688,12 +688,12 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	LWImageList *il;
 	LWControl *image[NMAP_SLOT_COUNT], *projection, *tileX, *tileY, *strength, *flipY, *sharpness, *albedoMode;
 	LWControl *amount[NMAP_SLOT_COUNT];
-	const char *items[NMAP_MAX_POPUP_IMAGES + 2];
-	LWImageID ids[NMAP_MAX_POPUP_IMAGES];
+	const char *items[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT + 2];
+	LWImageID ids[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT];
 	static LWPanControlDesc desc;
 	static LWValue ival = { LWT_INTEGER };
 	static const char *amountLabels[] = { "Albedo amount", "Roughness amount", "Metallic amount", "AO amount", "Specular amount" };
-	int count = 0, current[NMAP_SLOT_COUNT], missing[NMAP_SLOT_COUNT], i, value, *a;
+	int count = 0, current[NMAP_SLOT_COUNT], i, j, value, *a;
 
 	XCALL_INIT;
 	if (version != 1) return AFUNC_BADVERSION;
@@ -714,15 +714,23 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 			id = (*il->next)(id);
 		}
 	}
+	/* Append active images dropped by the popup cap so every selection
+	 * stays visible and can be cleared explicitly. */
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		if (!inst->map[i].imageID) continue;
+		for (j = 0; j < count; j++)
+			if (ids[j] == inst->map[i].imageID) break;
+		if (j < count) continue;
+		ids[count] = inst->map[i].imageID;
+		items[count + 1] = il ? (*il->name)(inst->map[i].imageID) : inst->map[i].imageName;
+		if (!items[count + 1]) items[count + 1] = inst->map[i].imageName;
+		count++;
+	}
 	items[count + 1] = 0;
 	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
 		current[i] = 0;
-		missing[i] = inst->map[i].imageID ? 1 : 0;
 		for (value = 0; value < count; value++)
-			if (ids[value] == inst->map[i].imageID) {
-				current[i] = value + 1;
-				missing[i] = 0;
-			}
+			if (ids[value] == inst->map[i].imageID) current[i] = value + 1;
 	}
 	pan = PAN_CREATE(panl, "Normal Map v" PLUGIN_VERSION);
 	if (!pan) return AFUNC_OK;
@@ -753,7 +761,7 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
 		for (i = 0; i < NMAP_SLOT_COUNT; i++) {
 			GET_INT(image[i], value);
-			if (value || !missing[i]) select_popup_slot(inst, i, value, count, ids, items);
+			select_popup_slot(inst, i, value, count, ids, items);
 		}
 		GET_INT(projection, inst->projection);
 		GET_INT(tileX, inst->tileX);
