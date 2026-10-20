@@ -169,6 +169,15 @@ $(BUILD)/toon.p: $(BUILD)/toon.o sdk $(STUBS)
 
 toon: $(BUILD)/toon.p
 
+# PostFilter - configurable post-render image filter
+$(BUILD)/postfilter.o: $(SRC)/postfilter/postfilter.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/postfilter.p: $(BUILD)/postfilter.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+postfilter: $(BUILD)/postfilter.p
+
 # ToonShader - Per-surface cel shader
 $(BUILD)/toonshader.o: $(SRC)/toonshader/toonshader.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -189,8 +198,8 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objlist objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
-PLUGIN_FILES = objswap objlist2 objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
+PLUGINS = objswap objlist objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader postfilter geoimport
+PLUGIN_FILES = objswap objlist2 objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader postfilter geoimport
 
 all: sdk $(PLUGINS)
 
