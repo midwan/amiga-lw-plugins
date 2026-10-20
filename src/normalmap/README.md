@@ -22,7 +22,7 @@ NormalMap projects a normal map and optional PBR-style material maps from object
 |---|---:|---:|---|
 | Normal image | Image list / None | None | Tangent-space normal map. |
 | Albedo / Colour | Image list / None | None | RGB base colour map. Replace blends toward the map; Multiply scales the existing surface colour. |
-| Roughness | Image list / None | None | Sets the normalized `ShaderAccess.roughness` value from map luminance: black is glossy/sharp and white is rough/broad. |
+| Roughness | Image list / None | None | Sets glossiness from map luminance: black is glossy (tight highlight) and white is rough (broad highlight). Converted to LightWave's `roughness` field, which is the reciprocal of the glossiness exponent. |
 | Metallic | Image list / None | None | Uses map luminance with the same Schlick-angle scalar treatment as PBR: it raises mirror and specular and reduces diffuse. |
 | Ambient occlusion | Image list / None | None | Darkens surface colour and diffuse by map luminance. White is unoccluded. |
 | Specular | Image list / None | None | Sets `ShaderAccess.specular` from map luminance. |

@@ -13,6 +13,7 @@
 
 extern struct ExecBase *SysBase;
 extern double sqrt(double);
+extern double pow(double, double);
 
 #define NMAP_MAX_NAME 128
 #define NMAP_MAX_POPUP_IMAGES 32
@@ -653,9 +654,14 @@ XCALL_(static void) Evaluate(NormalMapInst *inst, ShaderAccess *sa)
 		}
 	}
 	if (inst->map[NMAP_SLOT_ROUGHNESS].data && inst->roughnessAmount) {
+		double gloss;
 		amount = inst->roughnessAmount / 100.0;
 		sample_map(inst, &inst->map[NMAP_SLOT_ROUGHNESS], sa->oPos, inst->scratch.objectGeomNormal, rgb);
-		sa->roughness += (luma(rgb) - sa->roughness) * amount;
+		/* sa->roughness is the reciprocal of the glossiness exponent
+		 * (measured in-host: GLOS 16 -> 0.0625, GLOS 256 -> 0.0039).
+		 * Map roughness 0..1 to exponent 4096..4 and write 1/E. */
+		gloss = pow(2.0, 10.0 * (1.0 - luma(rgb)) + 2.0);
+		sa->roughness += (1.0 / gloss - sa->roughness) * amount;
 	}
 	if (inst->map[NMAP_SLOT_METALLIC].data && inst->metallicAmount) {
 		amount = inst->metallicAmount / 100.0;
