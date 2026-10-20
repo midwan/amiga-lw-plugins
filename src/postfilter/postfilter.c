@@ -2,7 +2,7 @@
  * POSTFILTER.C -- configurable post-render image filter for LightWave 3D.
  *
  * The filter performs its enabled operations in a documented fixed order:
- * colour correction, grain, blur, depth of field, edge-preserving smoothing,
+ * colour correction, grain, blur, edge-preserving smoothing,
  * then unsharp masking.  It uses only LightWave's image-filter API and is an
  * original implementation.
  */
@@ -39,7 +39,6 @@ typedef struct {
 	int enableNoise, noise;
 	int enableBlur, blurRadius, blurStyle;
 	int enableSharpen, sharpen;
-	int enableDof, focalDistance, depthRange, maxDofRadius;
 	int enableSmooth, variance;
 	int passes;
 } PostFilterInst;
@@ -139,9 +138,6 @@ normalise(PostFilterInst *inst)
 	inst->blurRadius = clamp_int(inst->blurRadius, 1, 12);
 	inst->blurStyle = clamp_int(inst->blurStyle, BLUR_BOX, BLUR_GAUSSIAN);
 	inst->sharpen = clamp_int(inst->sharpen, 0, 200);
-	inst->focalDistance = clamp_int(inst->focalDistance, 0, 255);
-	inst->depthRange = clamp_int(inst->depthRange, 1, 255);
-	inst->maxDofRadius = clamp_int(inst->maxDofRadius, 1, 12);
 	inst->variance = clamp_int(inst->variance, 0, 255);
 	inst->passes = clamp_int(inst->passes, 1, 4);
 }
@@ -164,10 +160,6 @@ Create(LWError *err)
 	inst->blurRadius = 1;
 	inst->blurStyle = BLUR_GAUSSIAN;
 	inst->enableSharpen = inst->sharpen = 0;
-	inst->enableDof = 0;
-	inst->focalDistance = 128;
-	inst->depthRange = 64;
-	inst->maxDofRadius = 4;
 	inst->enableSmooth = 0;
 	inst->variance = 20;
 	inst->passes = 1;
@@ -199,13 +191,13 @@ Load(PostFilterInst *inst, const LWLoadState *ls)
 	int i;
 	XCALL_INIT;
 	if (ls->ioMode == LWIO_SCENE) {
-		if (!spi_read_line(ls, buf, sizeof(buf)) || !buf[0]) return 0;
+		if (!spi_read_line(ls, buf, sizeof(iobuf)) || !buf[0]) return 0;
 		p = parse_int(buf, &version);
 		if (version != POSTFILTER_VERSION) return 0;
-		for (i = 0; i < 26; i++) p = parse_int(p, values + i);
+		for (i = 0; i < 22; i++) p = parse_int(p, values + i);
 	} else {
 		if (!spi_read_i32be(ls, &version) || version != POSTFILTER_VERSION) return 0;
-		for (i = 0; i < 26; i++)
+		for (i = 0; i < 22; i++)
 			if (!spi_read_i32be(ls, values + i)) return 0;
 	}
 	normalise(inst);
@@ -221,12 +213,12 @@ Save(PostFilterInst *inst, const LWSaveState *ss)
 	int i;
 	XCALL_INIT;
 	append_int(buf, &pos, POSTFILTER_VERSION);
-	for (i = 0; i < 26; i++) append_int(buf, &pos, values[i]);
+	for (i = 0; i < 22; i++) append_int(buf, &pos, values[i]);
 	if (ss->ioMode == LWIO_SCENE) {
 		spi_write_line(ss, buf);
 	} else {
 		spi_write_i32be(ss, POSTFILTER_VERSION);
-		for (i = 0; i < 26; i++) spi_write_i32be(ss, values[i]);
+		for (i = 0; i < 22; i++) spi_write_i32be(ss, values[i]);
 	}
 	return 0;
 }
@@ -296,61 +288,6 @@ blur_vertical(unsigned char *source, unsigned char *target,
 					weight += w;
 				}
 				target[base + channel] = (unsigned char)(weight > 0 ? (sum / weight) : source[base + channel]);
-			}
-		}
-	}
-}
-
-static void
-apply_dof(unsigned char *source, unsigned char *target, const unsigned char *mask,
-	const unsigned char *depth, int width, int height, const PostFilterInst *inst)
-{
-	int x, y, dx, dy;
-	int drange = inst->depthRange > 0 ? inst->depthRange : 1;
-	for (y = 0; y < height; y++) {
-		for (x = 0; x < width; x++) {
-			unsigned long pixel = (unsigned long)y * width + x;
-			unsigned long base = pixel * 3;
-			int radius;
-			int dist;
-			int rsum = 0, gsum = 0, bsum = 0, count = 0;
-			if (!in_region(mask, pixel)) {
-				target[base] = source[base]; target[base + 1] = source[base + 1]; target[base + 2] = source[base + 2];
-				continue;
-			}
-			dist = (int)depth[pixel] - inst->focalDistance;
-			if (dist < 0) dist = -dist;
-			radius = dist * inst->maxDofRadius / drange;
-			if (radius > inst->maxDofRadius) radius = inst->maxDofRadius;
-			if (radius <= 0) {
-				target[base] = source[base]; target[base + 1] = source[base + 1]; target[base + 2] = source[base + 2];
-				continue;
-			}
-			for (dy = -radius; dy <= radius; dy++) {
-				int ny = y + dy;
-				unsigned long rowOffset;
-				if (ny < 0 || ny >= height) continue;
-				rowOffset = (unsigned long)ny * width;
-				for (dx = -radius; dx <= radius; dx++) {
-					int nx = x + dx;
-					unsigned long neighbour;
-					unsigned long nbase;
-					if (nx < 0 || nx >= width) continue;
-					neighbour = rowOffset + nx;
-					if (!in_region(mask, neighbour)) continue;
-					nbase = neighbour * 3;
-					rsum += source[nbase];
-					gsum += source[nbase + 1];
-					bsum += source[nbase + 2];
-					count++;
-				}
-			}
-			if (count > 0) {
-				target[base] = (unsigned char)(rsum / count);
-				target[base + 1] = (unsigned char)(gsum / count);
-				target[base + 2] = (unsigned char)(bsum / count);
-			} else {
-				target[base] = source[base]; target[base + 1] = source[base + 1]; target[base + 2] = source[base + 2];
 			}
 		}
 	}
@@ -456,8 +393,7 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 {
 	unsigned long pixels;
 	unsigned long pixel;
-	unsigned char *front = 0, *back = 0, *mask = 0, *gammaTable = 0, *depth = 0;
-	int haveDepth = 1;
+	unsigned char *front = 0, *back = 0, *mask = 0, *gammaTable = 0;
 	int x, y, pass;
 	unsigned long random = 0x13579BDF;
 	XCALL_INIT;
@@ -467,10 +403,6 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 	back = (unsigned char *)plugin_alloc(pixels * 3);
 	mask = (unsigned char *)plugin_alloc(pixels);
 	if (!front || !back || !mask) goto done;
-	if (inst->enableDof) {
-		depth = (unsigned char *)plugin_alloc(pixels);
-		if (!depth) goto done;
-	}
 	if (inst->enableColor) {
 		gammaTable = (unsigned char *)plugin_alloc(256);
 		if (!gammaTable) goto done;
@@ -484,9 +416,7 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 		BufferValue *green = (*fa->bufLine)(LWBUF_GREEN, y);
 		BufferValue *blue = (*fa->bufLine)(LWBUF_BLUE, y);
 		BufferValue *alpha = (*fa->bufLine)(LWBUF_ALPHA, y);
-		BufferValue *depthLine = inst->enableDof ? (*fa->bufLine)(LWBUF_DEPTH, y) : 0;
 		if (!red || !green || !blue || !alpha) goto done;
-		if (inst->enableDof && !depthLine) haveDepth = 0;
 		for (x = 0; x < fa->width; x++) {
 			unsigned long base = ((unsigned long)y * fa->width + x) * 3;
 			pixel = (unsigned long)y * fa->width + x;
@@ -494,7 +424,6 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 			mask[pixel] = inst->region == REGION_FULL ||
 				(inst->region == REGION_OBJECTS && alpha[x] != 0) ||
 				(inst->region == REGION_BACKGROUND && alpha[x] == 0);
-			if (depth && haveDepth) depth[pixel] = depthLine[x];
 		}
 	}
 	if (inst->enableColor) {
@@ -547,12 +476,6 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 			blur_vertical(back, front, mask, fa->width, fa->height, inst->blurRadius, inst->blurStyle);
 		}
 	}
-	if (inst->enableDof && haveDepth) {
-		for (pass = 0; pass < inst->passes; pass++) {
-			apply_dof(front, back, mask, depth, fa->width, fa->height, inst);
-			memcpy(front, back, pixels * 3);
-		}
-	}
 	if (inst->enableSmooth) {
 		for (pass = 0; pass < inst->passes; pass++) {
 			apply_smooth(front, back, mask, fa->width, fa->height, inst->variance);
@@ -575,7 +498,6 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 	}
 done:
 	plugin_free(gammaTable);
-	plugin_free(depth);
 	plugin_free(mask);
 	plugin_free(back);
 	plugin_free(front);
@@ -585,7 +507,7 @@ XCALL_(static unsigned int)
 Flags(PostFilterInst *inst)
 {
 	XCALL_INIT;
-	return inst->enableDof ? (1UL << LWBUF_DEPTH) : 0;
+	return 0;
 }
 
 XCALL_(static const char *)
@@ -595,7 +517,7 @@ DescLn(PostFilterInst *inst)
 	XCALL_INIT;
 	descBuf[0] = '\0';
 	if (inst->enableColor) { strcat(descBuf, "Colour"); pos = 1; }
-	if (inst->enableBlur || inst->enableDof || inst->enableSmooth || inst->enableSharpen) {
+	if (inst->enableBlur || inst->enableSmooth || inst->enableSharpen) {
 		if (pos) strcat(descBuf, " + ");
 		strcat(descBuf, "Filter"); pos = 1;
 	}
@@ -607,7 +529,7 @@ static const char *regionItems[] = { "Full frame", "Objects only", "Background o
 static const char *blurItems[] = { "Box", "Gaussian", 0 };
 static const char *colourText[] = { "Balance and tone", 0 };
 static const char *textureText[] = { "Grain and blur", 0 };
-static const char *detailText[] = { "Depth of field and smoothing", 0 };
+static const char *detailText[] = { "Smoothing and sharpening", 0 };
 
 XCALL_(static int)
 Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverData)
@@ -616,7 +538,7 @@ Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverDa
 	LWPanelID pan;
 	LWControl *region, *colour, *red, *green, *blue, *brightness, *contrast, *gamma, *saturation;
 	LWControl *grey, *negative, *posterize, *noiseOn, *noise, *blurOn, *blurRadius, *blurStyle;
-	LWControl *sharpenOn, *sharpen, *dofOn, *focal, *range, *dofRadius, *smoothOn, *variance, *passes;
+	LWControl *sharpenOn, *sharpen, *smoothOn, *variance, *passes;
 	XCALL_INIT;
 	if (version != 1) return AFUNC_BADVERSION;
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
@@ -636,13 +558,12 @@ Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverDa
 		TEXT_CTL(panl, pan, "Texture", textureText);
 		noiseOn = BOOL_CTL(panl, pan, "Enable Grain"); noise = SLIDER_CTL(panl, pan, "Grain Amount", 130, 0, 100);
 		blurOn = BOOL_CTL(panl, pan, "Enable Blur"); blurRadius = SLIDER_CTL(panl, pan, "Blur Radius", 130, 1, 12); blurStyle = POPUP_CTL(panl, pan, "Blur Style", blurItems);
-		TEXT_CTL(panl, pan, "Depth and detail", detailText);
+		TEXT_CTL(panl, pan, "Detail", detailText);
 		sharpenOn = BOOL_CTL(panl, pan, "Enable Sharpen"); sharpen = SLIDER_CTL(panl, pan, "Sharpen Amount", 130, 0, 200);
-		dofOn = BOOL_CTL(panl, pan, "Enable Depth of Field"); focal = SLIDER_CTL(panl, pan, "Focal Distance", 130, 0, 255); range = SLIDER_CTL(panl, pan, "Depth Range", 130, 1, 255); dofRadius = SLIDER_CTL(panl, pan, "DOF Max Radius", 130, 1, 12);
 		smoothOn = BOOL_CTL(panl, pan, "Enable Smooth"); variance = SLIDER_CTL(panl, pan, "Smooth Variance", 130, 0, 255); passes = SLIDER_CTL(panl, pan, "Passes", 130, 1, 4);
-		SET_INT(region, inst->region); SET_INT(colour, inst->enableColor); SET_INT(red, inst->red); SET_INT(green, inst->green); SET_INT(blue, inst->blue); SET_INT(brightness, inst->brightness); SET_INT(contrast, inst->contrast); SET_INT(gamma, inst->gamma); SET_INT(saturation, inst->saturation); SET_INT(grey, inst->greyscale); SET_INT(negative, inst->negative); SET_INT(posterize, inst->posterize); SET_INT(noiseOn, inst->enableNoise); SET_INT(noise, inst->noise); SET_INT(blurOn, inst->enableBlur); SET_INT(blurRadius, inst->blurRadius); SET_INT(blurStyle, inst->blurStyle); SET_INT(sharpenOn, inst->enableSharpen); SET_INT(sharpen, inst->sharpen); SET_INT(dofOn, inst->enableDof); SET_INT(focal, inst->focalDistance); SET_INT(range, inst->depthRange); SET_INT(dofRadius, inst->maxDofRadius); SET_INT(smoothOn, inst->enableSmooth); SET_INT(variance, inst->variance); SET_INT(passes, inst->passes);
+		SET_INT(region, inst->region); SET_INT(colour, inst->enableColor); SET_INT(red, inst->red); SET_INT(green, inst->green); SET_INT(blue, inst->blue); SET_INT(brightness, inst->brightness); SET_INT(contrast, inst->contrast); SET_INT(gamma, inst->gamma); SET_INT(saturation, inst->saturation); SET_INT(grey, inst->greyscale); SET_INT(negative, inst->negative); SET_INT(posterize, inst->posterize); SET_INT(noiseOn, inst->enableNoise); SET_INT(noise, inst->noise); SET_INT(blurOn, inst->enableBlur); SET_INT(blurRadius, inst->blurRadius); SET_INT(blurStyle, inst->blurStyle); SET_INT(sharpenOn, inst->enableSharpen); SET_INT(sharpen, inst->sharpen); SET_INT(smoothOn, inst->enableSmooth); SET_INT(variance, inst->variance); SET_INT(passes, inst->passes);
 		if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
-			GET_INT(region, inst->region); GET_INT(colour, inst->enableColor); GET_INT(red, inst->red); GET_INT(green, inst->green); GET_INT(blue, inst->blue); GET_INT(brightness, inst->brightness); GET_INT(contrast, inst->contrast); GET_INT(gamma, inst->gamma); GET_INT(saturation, inst->saturation); GET_INT(grey, inst->greyscale); GET_INT(negative, inst->negative); GET_INT(posterize, inst->posterize); GET_INT(noiseOn, inst->enableNoise); GET_INT(noise, inst->noise); GET_INT(blurOn, inst->enableBlur); GET_INT(blurRadius, inst->blurRadius); GET_INT(blurStyle, inst->blurStyle); GET_INT(sharpenOn, inst->enableSharpen); GET_INT(sharpen, inst->sharpen); GET_INT(dofOn, inst->enableDof); GET_INT(focal, inst->focalDistance); GET_INT(range, inst->depthRange); GET_INT(dofRadius, inst->maxDofRadius); GET_INT(smoothOn, inst->enableSmooth); GET_INT(variance, inst->variance); GET_INT(passes, inst->passes);
+			GET_INT(region, inst->region); GET_INT(colour, inst->enableColor); GET_INT(red, inst->red); GET_INT(green, inst->green); GET_INT(blue, inst->blue); GET_INT(brightness, inst->brightness); GET_INT(contrast, inst->contrast); GET_INT(gamma, inst->gamma); GET_INT(saturation, inst->saturation); GET_INT(grey, inst->greyscale); GET_INT(negative, inst->negative); GET_INT(posterize, inst->posterize); GET_INT(noiseOn, inst->enableNoise); GET_INT(noise, inst->noise); GET_INT(blurOn, inst->enableBlur); GET_INT(blurRadius, inst->blurRadius); GET_INT(blurStyle, inst->blurStyle); GET_INT(sharpenOn, inst->enableSharpen); GET_INT(sharpen, inst->sharpen); GET_INT(smoothOn, inst->enableSmooth); GET_INT(variance, inst->variance); GET_INT(passes, inst->passes);
 			normalise(inst);
 		}
 		PAN_KILL(panl, pan);

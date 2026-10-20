@@ -1,8 +1,8 @@
 # PostFilter — Image Filter for LightWave 3D
 
 PostFilter is a configurable post-render image filter for LightWave 3D 5.x.
-It combines colour correction, grain, blur, depth-of-field blur,
-edge-preserving smoothing and unsharp masking in one filter instance.
+It combines colour correction, grain, blur, edge-preserving smoothing and
+unsharp masking in one filter instance.
 
 This is an original GPL implementation inspired by the public feature set of
 WaveFilter. It is not derived from WaveFilter source code.
@@ -45,13 +45,12 @@ Enabled operations run in this fixed order:
    greyscale, negative and posterize.
 2. **Grain** — deterministic monochrome noise.
 3. **Blur** — separable box or weighted Gaussian-style blur.
-4. **Depth of field** — per-pixel blur from the floating-point depth buffer.
-5. **Smooth** — a 3×3 edge-preserving pass that averages only neighbours
+4. **Smooth** — a 3×3 edge-preserving pass that averages only neighbours
    whose luminance differs by no more than **Smooth Variance**.
-6. **Sharpen** — an unsharp-mask pass.
+5. **Sharpen** — an unsharp-mask pass.
 
-**Passes** applies to blur, depth of field and smooth. It does not repeat
-colour, grain or sharpen.
+**Passes** applies to blur and smooth. It does not repeat colour, grain or
+sharpen.
 
 ### Colour
 
@@ -65,23 +64,15 @@ before posterize.
 Blur Radius is 1–12 pixels. Box gives equal weight to samples; Gaussian uses
 a triangular weight centred on the pixel. Sharpen Amount is 0–200%.
 
-### Depth of field
+## Limitations
 
-**Focal Distance** and **Depth Range** are in the 0-255 units of the render
-depth buffer that LightWave exposes to image filters. Pixels farther from the
-focal distance receive a blur radius proportional to their distance, up to
-**DOF Max Radius**. Start by rendering with a low maximum radius, then adjust
-the focal distance to the object that should remain sharp.
-
-LightWave 5.0 does not provide a depth buffer to image filters (the buffer
-access returns nothing), so on 5.0 the depth-of-field pass is skipped and the
-rest of the filter still runs. On hosts that fill the buffer, the pass works
-as described.
+LightWave 5.0 gives image filters no depth buffer, so PostFilter has no
+depth-of-field pass. Use the camera's built-in Depth of Field for DOF.
 
 ## Performance
 
 Colour, grain and the neighbourhood filters use integer arithmetic where it
 is useful. Gamma is calculated once per frame into a 256-entry lookup table.
 Blur is separable, and all full-frame working buffers are allocated from the
-Amiga public heap rather than the LightWave callback stack. Large blur radii,
-multiple passes and depth of field increase render time.
+Amiga public heap rather than the LightWave callback stack. Large blur radii
+and multiple passes increase render time.
