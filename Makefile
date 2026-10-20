@@ -69,6 +69,16 @@ $(BUILD)/objswap.p: $(BUILD)/objswap.o sdk $(STUBS)
 
 objswap: $(BUILD)/objswap.p
 
+# ObjList - Object replacement from a frame list
+$(BUILD)/objlist2.o: $(SRC)/objlist/objlist.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/objlist2.p: $(BUILD)/objlist2.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+objlist: $(BUILD)/objlist2.p
+
+
 # ObjMeshSwap - Object replacement preserving base surfaces
 $(BUILD)/objmeshswap.o: $(SRC)/objmeshswap/objmeshswap.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -87,6 +97,15 @@ $(BUILD)/fresnel.p: $(BUILD)/fresnel.o sdk $(STUBS)
 
 fresnel: $(BUILD)/fresnel.p
 
+# SurfList - Surface material replacement by frame list
+$(BUILD)/surflist.o: $(SRC)/surflist/surflist.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/surflist.p: $(BUILD)/surflist.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+surflist: $(BUILD)/surflist.p
+
 # PBR - Combined PBR-lite shader
 $(BUILD)/pbr.o: $(SRC)/pbr/pbr.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -96,14 +115,14 @@ $(BUILD)/pbr.p: $(BUILD)/pbr.o sdk $(STUBS)
 
 pbr: $(BUILD)/pbr.p
 
-# LensFlare - Specular lens flare image filter
-$(BUILD)/lensflare.o: $(SRC)/lensflare/lensflare.c | $(BUILD)
+# SpecFlare - Specular lens flare image filter
+$(BUILD)/specflare.o: $(SRC)/specflare/specflare.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/lensflare.p: $(BUILD)/lensflare.o sdk $(STUBS)
+$(BUILD)/specflare.p: $(BUILD)/specflare.o sdk $(STUBS)
 	$(call build-plugin,$@,$<)
 
-lensflare: $(BUILD)/lensflare.p
+specflare: $(BUILD)/specflare.p
 
 # PNGsaver - PNG image saver
 $(BUILD)/pngsaver.o: $(SRC)/pngsaver/pngsaver.c | $(BUILD)
@@ -159,6 +178,15 @@ $(BUILD)/postfilter.p: $(BUILD)/postfilter.o sdk $(STUBS)
 
 postfilter: $(BUILD)/postfilter.p
 
+# ToonShader - Per-surface cel shader
+$(BUILD)/toonshader.o: $(SRC)/toonshader/toonshader.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/toonshader.p: $(BUILD)/toonshader.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+toonshader: $(BUILD)/toonshader.p
+
 # GeoImport - VideoScape GEO object loader
 $(BUILD)/geoimport.o: $(SRC)/geoimport/geoimport.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -170,7 +198,8 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon postfilter geoimport
+PLUGINS = objswap objlist objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader postfilter geoimport
+PLUGIN_FILES = objswap objlist2 objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader postfilter geoimport
 
 all: sdk $(PLUGINS)
 
@@ -202,10 +231,10 @@ PKG_LHA   = $(BUILD)/$(PKG_ROOT)-$(PVER).lha
 package: all fpu
 	rm -rf $(PKG_DIR) $(PKG_LHA)
 	mkdir -p $(PKG_STAGE)/Plugins/Generic $(PKG_STAGE)/Docs
-	cp $(PLUGINS:%=$(BUILD)/%.p) $(PKG_STAGE)/Plugins/Generic/
+	cp $(PLUGIN_FILES:%=$(BUILD)/%.p) $(PKG_STAGE)/Plugins/Generic/
 	for v in $(FPU_VARIANTS); do \
 		mkdir -p $(PKG_STAGE)/Plugins/$$v && \
-		cp $(PLUGINS:%=build-$$v/%.p) $(PKG_STAGE)/Plugins/$$v/ || exit 1; \
+		cp $(PLUGIN_FILES:%=build-$$v/%.p) $(PKG_STAGE)/Plugins/$$v/ || exit 1; \
 	done
 	for d in Generic $(FPU_VARIANTS); do cp package/icons/drawer.info $(PKG_STAGE)/Plugins/$$d.info || exit 1; done
 	sed 's/@VERSION@/$(PVER)/' package/Install | tr -d '\r' > $(PKG_STAGE)/Install

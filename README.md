@@ -12,16 +12,19 @@ workflow, and plugin set.
 | Plugin | Class | Output | Documentation |
 |---|---|---|---|
 | ObjSwap | Object replacement | `objswap.p` | [README](src/objswap/README.md) |
+| ObjList | List-driven object replacement | `objlist2.p` | [README](src/objlist/README.md) |
 | ObjMeshSwap | Surface-preserving object replacement | `objmeshswap.p` | [README](src/objmeshswap/README.md) |
 | Fresnel | Shader | `fresnel.p` | [README](src/fresnel/README.md) |
+| SurfList | Shader | `surflist.p` | [README](src/surflist/README.md) |
 | PBR | Shader | `pbr.p` | [README](src/pbr/README.md) |
-| LensFlare | Image filter | `lensflare.p` | [README](src/lensflare/README.md) |
+| SpecFlare | Image filter | `specflare.p` | [README](src/specflare/README.md) |
 | PNGsaver | Image saver | `pngsaver.p` | [README](src/pngsaver/README.md) |
 | PNGloader | Image loader | `pngloader.p` | [README](src/pngloader/README.md) |
 | NormalMap | Shader | `normalmap.p` | [README](src/normalmap/README.md) |
 | Motion | Item motion | `motion.p` | [README](src/motion/README.md) |
 | Toon | Image filter | `toon.p` | [README](src/toon/README.md) |
 | PostFilter | Image filter | `postfilter.p` | [README](src/postfilter/README.md) |
+| ToonShader | Shader | `toonshader.p` | [README](src/toonshader/README.md) |
 | GEOimport | Object loader (VideoScape `.geo`) | `geoimport.p` | [README](src/geoimport/README.md) |
 
 ## Installation
@@ -71,16 +74,19 @@ Build a single plugin:
 
 ```bash
 ./build.sh objswap
+./build.sh objlist
 ./build.sh objmeshswap
 ./build.sh fresnel
+./build.sh surflist
 ./build.sh pbr
-./build.sh lensflare
+./build.sh specflare
 ./build.sh pngsaver
 ./build.sh pngloader
 ./build.sh normalmap
 ./build.sh motion
 ./build.sh toon
 ./build.sh postfilter
+./build.sh toonshader
 ./build.sh geoimport
 ```
 
@@ -144,15 +150,18 @@ library patched for GCC compatibility:
 |   `-- source/
 `-- src/
     |-- objswap/
+    |-- objlist/
     |-- objmeshswap/
     |-- fresnel/
+    |-- surflist/
     |-- pbr/
-    |-- lensflare/
+    |-- specflare/
     |-- pngsaver/
     |-- pngloader/
     |-- normalmap/
     |-- motion/
     |-- toon/
     |-- postfilter/
+    |-- toonshader/
     `-- geoimport/
 ```
