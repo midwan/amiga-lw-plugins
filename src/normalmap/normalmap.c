@@ -290,7 +290,7 @@ static void load_v1_scene(NormalMapInst *inst, const char *line, const LWLoadSta
 	/* Read straight into instance storage: this runs on the callback
 	 * stack while Load's own line buffer is live. */
 	slot[0] = '\0';
-	if (spi_read_line(ls, slot, NMAP_MAX_NAME) && !slot[0]) slot[0] = '\0';
+	spi_read_line(ls, slot, NMAP_MAX_NAME);
 }
 /* Object SDAT strings are length-prefixed.  An empty record is a valid
  * unassigned map slot, so its zero length must not be treated as an error. */
