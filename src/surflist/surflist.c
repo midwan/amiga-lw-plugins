@@ -189,7 +189,7 @@ set_surface_defaults(SurfaceParams *params)
 	params->roughness = 1.0 / 16.0;
 }
 
-static void
+static int
 parse_surface_chunk(const unsigned char *data, unsigned long length,
                     SurfaceParams *params)
 {
@@ -198,7 +198,8 @@ parse_surface_chunk(const unsigned char *data, unsigned long length,
 	unsigned int flags = 0;
 
 	while (pos < length && data[pos]) pos++;
-	if (pos < length) pos++;
+	if (pos >= length) return 0;
+	pos++;
 	if (pos & 1) pos++;
 
 	while (pos + 6 <= length) {
@@ -246,6 +247,7 @@ parse_surface_chunk(const unsigned char *data, unsigned long length,
 		pos = next + (next & 1);
 	}
 	if (!explicitLuminous && (flags & 1)) params->luminous = 1.0;
+	return 1;
 }
 
 static int
@@ -270,8 +272,7 @@ load_surface(const char *path, SurfaceParams *params)
 			break;
 		next = pos + 8 + chunkSize;
 		if (same_id(data + pos, "SURF")) {
-			parse_surface_chunk(data + pos + 8, chunkSize, params);
-			found = 1;
+			found = parse_surface_chunk(data + pos + 8, chunkSize, params);
 			break;
 		}
 		pos = next + (next & 1);
