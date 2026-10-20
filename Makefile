@@ -159,9 +159,27 @@ $(BUILD)/geoimport.p: $(BUILD)/geoimport.o sdk $(STUBS)
 
 geoimport: $(BUILD)/geoimport.p
 
+# Instancer - Modeler geometry copier
+$(BUILD)/instancer.o: $(SRC)/instancer/instancer.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/instancer.p: $(BUILD)/instancer.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+instancer: $(BUILD)/instancer.p
+
+# InstanceColor - Per-instance colour shader
+$(BUILD)/instcolor.o: $(SRC)/instcolor/instcolor.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/instcolor.p: $(BUILD)/instcolor.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+instcolor: $(BUILD)/instcolor.p
+
 # ---- Targets ----
 
-PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport
+PLUGINS = objswap objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon geoimport instancer instcolor
 
 all: sdk $(PLUGINS)
 

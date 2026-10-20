@@ -22,6 +22,8 @@ workflow, and plugin set.
 | Motion | Item motion | `motion.p` | [README](src/motion/README.md) |
 | Toon | Image filter | `toon.p` | [README](src/toon/README.md) |
 | GEOimport | Object loader (VideoScape `.geo`) | `geoimport.p` | [README](src/geoimport/README.md) |
+| Instancer | Modeler geometry copier | `instancer.p` | [README](src/instancer/README.md) |
+| InstanceColor | Shader | `instcolor.p` | [README](src/instcolor/README.md) |
 
 ## Installation
 
@@ -32,13 +34,13 @@ Most users should install a published release rather than build from source.
    and extract it on the Amiga.
 2. Run the `Install` icon in the `LW-Plugins` drawer (needs the Commodore
    Installer). It detects the CPU and FPU, preselects the matching build,
-   and copies the plugins you choose into your LightWave plug-ins drawer,
-   GEOimport into the Modeler plug-ins drawer, plus optional documentation.
+   and copies Layout plugins to your LightWave plug-ins drawer, GEOimport and
+   Instancer to the Modeler plug-ins drawer, plus optional documentation.
 3. Start Layout without loading a scene or object.
 4. Open the Options tab, choose **Add Plug-Ins**, and select the copied
    `.p` file.
 5. Restart Layout so LightWave writes the plugin entry to its config file.
-   GEOimport is registered the same way in Modeler.
+   GEOimport and Instancer are registered the same way in Modeler.
 
 The archive holds four builds of every plugin under `LW-Plugins/Plugins/`.
 To install by hand, copy the `.p` files from the drawer matching your CPU:
@@ -80,6 +82,8 @@ Build a single plugin:
 ./build.sh motion
 ./build.sh toon
 ./build.sh geoimport
+./build.sh instancer
+./build.sh instcolor
 ```
 
 Clean generated objects and plugin binaries:
@@ -151,5 +155,7 @@ library patched for GCC compatibility:
     |-- normalmap/
     |-- motion/
     |-- toon/
-    `-- geoimport/
+    |-- geoimport/
+    |-- instancer/
+    `-- instcolor/
 ```
