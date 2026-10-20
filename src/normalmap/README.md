@@ -1,87 +1,54 @@
-# Normal Map Shader — Texture-Based Normal Perturbation for LightWave 3D
+# Normal Map Shader — Projected Normal and Material Maps for LightWave 3D
 
-A shader plugin that samples a tangent-space normal map image and perturbs
-surface normals at render time.  This brings a modern material technique to
-LightWave 5.x, allowing fine surface detail (bricks, rivets, fabric weave,
-skin pores) to appear in lighting and reflections without adding geometry.
-
-## How It Works
-
-1. The user loads a standard RGB normal map image into LightWave's image list
-   (via the PNGloader plugin or any supported format).
-2. The shader derives UV coordinates from the object-space position using a
-   selectable planar projection (XY, XZ, or YZ).
-3. At each shading point, the normal map is sampled with anti-aliased
-   filtering (`RGBSpot`).
-4. The RGB colour is decoded into a tangent-space normal vector:
-   `X = R*2-1`, `Y = G*2-1`, `Z = B`.
-5. A tangent frame is constructed from the surface normal, and the
-   tangent-space perturbation is transformed into world space.
-6. The perturbed normal is blended with the original based on the Strength
-   setting and written to `wNorm` for all subsequent shading.
+NormalMap projects a normal map and optional PBR-style material maps from object-space coordinates. It is intended for LWOB objects, which do not store UV coordinates. Every enabled map uses the same projection, tile values, and object-space origin, so a map set stays aligned.
 
 ## Installation
 
-1. Run `Install` from the `LW-Plugins` release archive, or copy `normalmap.p` from the archive's `Plugins/` drawer that matches your CPU (`Generic`, `020fpu`, `040fpu` or `060fpu`) to your LightWave plugins directory
-2. Run Layout and, without loading any scene or object, under Options tab click on 'Add Plug-Ins'
-3. Navigate to the directory you copied the plugin and select it.
-4. Restart Layout so that the configuration file get updated with the new plug-in entry.
+1. Run `Install` from the release archive, or copy `normalmap.p` from the matching `Plugins/` CPU drawer to the LightWave plugin directory.
+2. In Layout, add the plugin with **Options > Add Plug-Ins** and restart Layout.
+3. Add **NormalMap** in a surface's **Shaders** panel.
 
-## Usage
+## Workflow for a map set
 
-1. Load a normal map image into LightWave (Images panel or via PNGloader)
-2. Open the **Surfaces** panel in Layout
-3. Select a surface and go to the **Shaders** section
-4. Add **NormalMap** from the shader list
-5. Click **Options** to configure:
-   - Select the normal map image from the dropdown
-   - Choose the projection axis that matches your model's orientation
-   - Adjust tiling and strength
-6. Render to see the effect
+1. Load the normal map and any albedo, roughness, metallic, ambient-occlusion, and specular images into LightWave's image list.
+2. Open **NormalMap Options** for the surface and select the images from their individual dropdowns. `(None)` disables a slot.
+3. Choose an axis projection for a flat surface, or **Triplanar (box)** for automatic seamless projection over several faces.
+4. Set tile values once. They apply to every slot, which keeps the source map set registered.
+5. Choose an Albedo mode and adjust each map amount. Render after changing image selections; the shader prepares its image copies when Layout initializes the surface.
 
-### Settings
+## Settings
 
 | Setting | Range | Default | Description |
-|---|---|---|---|
-| Image | (dropdown) | None | Select a loaded image as the normal map |
-| Projection | XY / XZ / YZ | Planar XY | Axis pair used to derive UV coordinates |
-| Tile X % | 1 - 10000 | 100 | Horizontal tiling factor (100 = 1x, 200 = 2x) |
-| Tile Y % | 1 - 10000 | 100 | Vertical tiling factor |
-| Strength | 0 - 100 | 100 | How strongly the normal map affects the surface |
-| Flip Y | on/off | off | Flip the green channel for DirectX-convention maps |
+|---|---:|---:|---|
+| Normal image | Image list / None | None | Tangent-space normal map. |
+| Albedo / Colour | Image list / None | None | RGB base colour map. Replace blends toward the map; Multiply scales the existing surface colour. |
+| Roughness | Image list / None | None | Sets glossiness from map luminance: black is glossy (tight highlight) and white is rough (broad highlight). Converted to LightWave's `roughness` field, which is the reciprocal of the glossiness exponent. |
+| Metallic | Image list / None | None | Uses map luminance with the same Schlick-angle scalar treatment as PBR: it raises mirror and specular and reduces diffuse. |
+| Ambient occlusion | Image list / None | None | Darkens surface colour and diffuse by map luminance. White is unoccluded. |
+| Specular | Image list / None | None | Sets `ShaderAccess.specular` from map luminance. |
+| Projection | XY / XZ / YZ / Triplanar (box) | XY | Common projection for all slots. |
+| Tile X %, Tile Y % | 1–10000 | 100 | Common repeat factors; 100 is one repeat. |
+| Normal strength | 0–100 | 100 | Blend from the unmodified normal to the normal-map result. |
+| Flip normal Y | on/off | off | Use for DirectX-convention normal maps. |
+| Box blend sharpness | 1–8 | 2 | Higher values retain each box face longer; lower values soften transitions. Applies only in Triplanar mode. |
+| Albedo mode | Multiply / Replace | Replace | How the Albedo map combines with the surface's existing colour. |
+| Map amounts | 0–100 | 100 | Per-map influence for Albedo, Roughness, Metallic, AO, and Specular. |
 
-### Choosing a Projection
+Single-channel maps are read as Rec. 709 luminance (`0.2126 R + 0.7152 G + 0.0722 B`). Grayscale images therefore work without conversion; a red-only map is also usable, but its luminance is lower than the red value.
 
-- **Planar XY (front)**: Best for walls, screens, and front-facing surfaces
-- **Planar XZ (top)**: Best for floors, ceilings, and ground planes
-- **Planar YZ (side)**: Best for side walls and vertical surfaces
+## Projection modes
 
-The projection determines how the 2D image maps onto the 3D surface.  For
-best results, choose the axis that most closely faces the surface's primary
-orientation.
+- **Planar XY, XZ, YZ** derive UVs from the corresponding object-space coordinates. Select the plane that faces the surface.
+- **Triplanar (box)** samples XY, XZ, and YZ and blends them from the absolute object-space normal. It builds an axis-specific tangent frame for the normal map, so normal detail is oriented correctly on each box face. It is useful on cubes, rocks, and rounded meshes without UVs.
 
-### Normal Map Conventions
+There are no UVs, projection offsets, or separate per-map transforms. This is deliberate: the shader makes an LWOB map set line up by sharing one projection. Use an image whose features tile at the object-space scale you select.
 
-Most normal maps use the **OpenGL convention** (Y-up in tangent space) by
-default.  If your normal map was created for DirectX (Y-down), enable
-**Flip Y** to correct the green channel.
+## Shader stacking
 
-Normal maps should have a dominant blue colour (the Z component pointing
-outward).  Pure flat normals are encoded as RGB (128, 128, 255).
+NormalMap changes its requested shader attributes only when the corresponding map slot is enabled: normal, colour, roughness, mirror/diffuse/specular, AO colour/diffuse, and specular. Put it before shaders that should use its perturbed normal or material attributes.
 
-### Stacking with Other Shaders
+The included PBR shader has its own procedural roughness, metallic, and AO settings. Do not enable both plugins' controls for the same property unless their combined effect is wanted. NormalMap's metallic map uses PBR's scalar Schlick-angle treatment before it raises mirror/specular and reduces diffuse. LightWave 5 exposes no independent RGB specular colour in `ShaderAccess`; use the Albedo map to supply the material colour associated with a metal.
 
-The Normal Map shader pairs well with:
-- **Fresnel** — angle-dependent reflection now follows the perturbed normals
-- **PBR Shader** — metallic/roughness responds to normal-mapped detail
-- **LensFlare** — specular highlights from perturbed normals create more
-  interesting flare patterns
+## Persistence and compatibility
 
-Apply Normal Map **before** other shaders in the stack so they see the
-modified normals.
-
-## Scene Persistence
-
-All settings including the image name are saved with the scene.  On reload
-the shader looks up the image by name in LightWave's image list.  If the
-image has not been loaded yet, the shader has no effect until it is.
+Version 2 saves the six image names and new settings. It also reads version 1 scene and LWOB `SDAT` data unchanged: the original normal image, planar projection, tiling, strength, and Flip Y values are retained, while new map slots remain disabled.
