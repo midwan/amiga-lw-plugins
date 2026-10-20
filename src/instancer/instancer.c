@@ -46,7 +46,6 @@ typedef struct {
 	double sinPitch, cosPitch;
 	double sinBank, cosBank;
 	double scale;
-	int copiedPolygons;
 	int copiedFaces;
 } InstanceWork;
 static unsigned int
@@ -90,7 +89,6 @@ reduce_angle(double x)
 		x = x + two_pi;
 	return x;
 }
-
 static double
 sin_approx(double angle)
 {
@@ -105,7 +103,7 @@ sin_approx(double angle)
 		-7.647163731819816e-13
 	};
 	double x = reduce_angle(angle);
-	double x2 = x * x;
+	double x2;
 	double acc;
 	int i;
 
@@ -135,7 +133,7 @@ cos_approx(double angle)
 		4.779477332387385e-14
 	};
 	double x = reduce_angle(angle);
-	double x2 = x * x;
+	double x2;
 	double acc;
 	int negate = 0;
 	int i;
@@ -153,6 +151,7 @@ cos_approx(double angle)
 		acc = acc * x2 + c[i];
 	return negate ? -acc : acc;
 }
+
 static void
 append_int(char *buffer, int *pos, int value)
 {
@@ -274,7 +273,6 @@ copy_polygon(void *data, const PolygonInfo *info)
 	}
 	if (!copied)
 		return EDERR_NOMEMORY;
-	work->copiedPolygons++;
 	if (!(info->flags & PPDF_CURVE))
 		work->copiedFaces++;
 	return EDERR_NONE;
@@ -415,7 +413,6 @@ run_instancer(GlobalFunc *global, MeshEditBegin *local, int quiet)
 	work.pointIndex = 0;
 	work.targetIndex = 0;
 	work.maxPolygonPoints = 0;
-	work.copiedPolygons = 0;
 	work.copiedFaces = 0;
 	if (work.pointCount < 1 || work.targetCount < 1) {
 		(*op->done)(op->state, EDERR_NONE, 0);
@@ -472,7 +469,7 @@ run_instancer(GlobalFunc *global, MeshEditBegin *local, int quiet)
 	}
 	report[reportPos] = '\0';
 	if (!quiet)
-		(*message->info)("InstanceColor setting", report);
+		(*message->info)("Instancer", report);
 
 finish:
 	if (work.polygonPoints)

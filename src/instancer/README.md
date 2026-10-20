@@ -47,9 +47,15 @@ systems. Save the output as an object if it is needed in Layout.
 
 ## Scripts and ARexx
 
-The plugin also registers a `CommandSequence` server named `InstancerBatch`.
 Calling it from ARexx or a script with any argument, for example
 `CMDSEQ('InstancerBatch', 'quiet')`, runs the copy step with the settings
 remembered from the last interactive run (or the defaults) and shows no
 dialogs, so it can run unattended. The polygons-per-instance count is then
-the polygon count of the source mesh.
+the face count of the source mesh.
+
+The argument can also carry nine numbers that override the settings:
+heading minimum and maximum, pitch minimum and maximum, bank minimum and
+maximum, scale minimum and maximum, and the seed, in that order. For
+example `CMDSEQ('InstancerBatch', '15 75 -25 25 -40 10 0.8 1.2 7')` uses
+heading 15-75, pitch -25-25, bank -40-10, scale 0.8-1.2 and seed 7. Fewer
+than nine numbers leaves the remembered settings unchanged.

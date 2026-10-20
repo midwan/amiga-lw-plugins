@@ -23,7 +23,6 @@ typedef struct {
 
 #define INSTCOLOR_OBJECT_VERSION 1
 
-static MessageFuncs *messages;
 
 static void *
 plugin_alloc(unsigned long size)
@@ -411,8 +410,6 @@ Activate(long version, GlobalFunc *global, void *local, void *serverData)
 	handler->evaluate = (void *)Evaluate;
 	handler->flags = (void *)Flags;
 	handler->descln = (void *)DescLn;
-	messages = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
-	if (!messages) return AFUNC_BADGLOBAL;
 	return AFUNC_OK;
 }
 
