@@ -492,6 +492,7 @@ static void sample_2d(const MapSlot *slot, double u, double v, double rgb[3])
 	}
 	fx = u * slot->width;
 	fy = (1.0 - v) * slot->height;
+	if (fx >= slot->width) fx = 0.0;
 	if (fy >= slot->height) fy = 0.0;
 	x0 = (int)fx;
 	y0 = (int)fy;
@@ -567,16 +568,19 @@ static double luma(const double rgb[3])
 
 static void object_to_world(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->oXfrm[0] * in[0] + sa->oXfrm[3] * in[1] + sa->oXfrm[6] * in[2];
-	out[1] = sa->oXfrm[1] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[7] * in[2];
-	out[2] = sa->oXfrm[2] * in[0] + sa->oXfrm[5] * in[1] + sa->oXfrm[8] * in[2];
+	/* Alias-safe: callers may pass in == out. */
+	double x = sa->oXfrm[0] * in[0] + sa->oXfrm[3] * in[1] + sa->oXfrm[6] * in[2];
+	double y = sa->oXfrm[1] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[7] * in[2];
+	double z = sa->oXfrm[2] * in[0] + sa->oXfrm[5] * in[1] + sa->oXfrm[8] * in[2];
+	out[0] = x; out[1] = y; out[2] = z;
 }
 
 static void world_to_object(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->wXfrm[0] * in[0] + sa->wXfrm[3] * in[1] + sa->wXfrm[6] * in[2];
-	out[1] = sa->wXfrm[1] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[7] * in[2];
-	out[2] = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
+	double x = sa->wXfrm[0] * in[0] + sa->wXfrm[3] * in[1] + sa->wXfrm[6] * in[2];
+	double y = sa->wXfrm[1] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[7] * in[2];
+	double z = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
+	out[0] = x; out[1] = y; out[2] = z;
 }
 
 static void axis_normal(int axis, const double rgb[3], int flipY, double sign, int mirrorV, double out[3])
