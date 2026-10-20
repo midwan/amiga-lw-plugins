@@ -15,6 +15,7 @@ workflow, and plugin set.
 | ObjList | List-driven object replacement | `objlist2.p` | [README](src/objlist/README.md) |
 | ObjMeshSwap | Surface-preserving object replacement | `objmeshswap.p` | [README](src/objmeshswap/README.md) |
 | Fresnel | Shader | `fresnel.p` | [README](src/fresnel/README.md) |
+| SurfList | Shader | `surflist.p` | [README](src/surflist/README.md) |
 | PBR | Shader | `pbr.p` | [README](src/pbr/README.md) |
 | SpecFlare | Image filter | `specflare.p` | [README](src/specflare/README.md) |
 | PNGsaver | Image saver | `pngsaver.p` | [README](src/pngsaver/README.md) |
@@ -75,6 +76,7 @@ Build a single plugin:
 ./build.sh objlist
 ./build.sh objmeshswap
 ./build.sh fresnel
+./build.sh surflist
 ./build.sh pbr
 ./build.sh specflare
 ./build.sh pngsaver
@@ -149,6 +151,7 @@ library patched for GCC compatibility:
     |-- objlist/
     |-- objmeshswap/
     |-- fresnel/
+    |-- surflist/
     |-- pbr/
     |-- specflare/
     |-- pngsaver/

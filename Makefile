@@ -97,6 +97,15 @@ $(BUILD)/fresnel.p: $(BUILD)/fresnel.o sdk $(STUBS)
 
 fresnel: $(BUILD)/fresnel.p
 
+# SurfList - Surface material replacement by frame list
+$(BUILD)/surflist.o: $(SRC)/surflist/surflist.c | $(BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/surflist.p: $(BUILD)/surflist.o sdk $(STUBS)
+	$(call build-plugin,$@,$<)
+
+surflist: $(BUILD)/surflist.p
+
 # PBR - Combined PBR-lite shader
 $(BUILD)/pbr.o: $(SRC)/pbr/pbr.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -180,8 +189,8 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objlist objmeshswap fresnel pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
-PLUGIN_FILES = objswap objlist2 objmeshswap fresnel pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
+PLUGINS = objswap objlist objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
+PLUGIN_FILES = objswap objlist2 objmeshswap fresnel surflist pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
 
 all: sdk $(PLUGINS)
 

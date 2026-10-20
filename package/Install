@@ -88,7 +88,7 @@
 			(help "All plugins are selected by default. Each one is described in the documentation drawer.")
 			(choices
 				"ObjSwap + ObjList + ObjMeshSwap (object replacement)"
-				"Fresnel (shader)"
+				"Fresnel + SurfList (shaders)"
 				"PBR (shader)"
 				"NormalMap (shader)"
 				"SpecFlare (image filter)"
@@ -111,6 +111,7 @@
 (set #bit 0 #file "objmeshswap.p") (P_Plugin)
 (set #bit 0 #file "objlist2.p") (P_Plugin)
 (set #bit 1 #file "fresnel.p") (P_Plugin)
+(set #bit 1 #file "surflist.p") (P_Plugin)
 (set #bit 2 #file "pbr.p") (P_Plugin)
 (set #bit 3 #file "normalmap.p") (P_Plugin)
 (set #bit 4 #file "specflare.p") (P_Plugin)
