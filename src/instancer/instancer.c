@@ -47,8 +47,8 @@ typedef struct {
 	double sinBank, cosBank;
 	double scale;
 	int copiedPolygons;
+	int copiedFaces;
 } InstanceWork;
-
 static unsigned int
 next_random(unsigned int *state)
 {
@@ -71,7 +71,8 @@ random_range(unsigned int *state, double minimum, double maximum)
 
 /* Self-contained sine/cosine: no libm calls, so no double-return ABI
  * dependency in FPU builds (AGENTS.md FPU notes). Taylor series after
- * range reduction to [-pi, pi]. */
+ * range reduction to [-pi/2, pi/2]; sin(x) = x*(1 + x2*(c1 + x2*(...))),
+ * cos(x) = 1 + x2*(c1 + x2*(...)). Max error below 1e-9 on that range. */
 static double
 reduce_angle(double x)
 {
@@ -93,21 +94,28 @@ reduce_angle(double x)
 static double
 sin_approx(double angle)
 {
-	static const double c[6] = {
+	static const double c[8] = {
 		1.0,
 		-0.16666666666666666,
 		0.008333333333333333,
 		-0.0001984126984126984,
-		2.7557319223985893e-07,
-		-2.505210838544172e-09
+		2.7557319223985893e-06,
+		-2.505210838544172e-08,
+		1.6059043836821613e-10,
+		-7.647163731819816e-13
 	};
 	double x = reduce_angle(angle);
 	double x2 = x * x;
 	double acc;
 	int i;
 
-	acc = c[5];
-	for (i = 4; i >= 0; i--)
+	if (x > 1.5707963267948966)
+		x = 3.141592653589793 - x;
+	else if (x < -1.5707963267948966)
+		x = -3.141592653589793 - x;
+	x2 = x * x;
+	acc = c[7];
+	for (i = 6; i >= 0; i--)
 		acc = acc * x2 + c[i];
 	return x * acc;
 }
@@ -115,25 +123,36 @@ sin_approx(double angle)
 static double
 cos_approx(double angle)
 {
-	static const double c[6] = {
+	static const double c[9] = {
 		1.0,
 		-0.5,
 		0.041666666666666664,
 		-0.001388888888888889,
 		2.48015873015873e-05,
-		-2.7557319223985893e-07
+		-2.755731922398589e-07,
+		2.08767569878681e-09,
+		-1.1470745597729725e-11,
+		4.779477332387385e-14
 	};
 	double x = reduce_angle(angle);
 	double x2 = x * x;
 	double acc;
+	int negate = 0;
 	int i;
 
-	acc = c[5];
-	for (i = 4; i >= 0; i--)
+	if (x > 1.5707963267948966) {
+		x = 3.141592653589793 - x;
+		negate = 1;
+	} else if (x < -1.5707963267948966) {
+		x = -3.141592653589793 - x;
+		negate = 1;
+	}
+	x2 = x * x;
+	acc = c[8];
+	for (i = 7; i >= 0; i--)
 		acc = acc * x2 + c[i];
-	return acc;
+	return negate ? -acc : acc;
 }
-
 static void
 append_int(char *buffer, int *pos, int value)
 {
@@ -256,9 +275,10 @@ copy_polygon(void *data, const PolygonInfo *info)
 	if (!copied)
 		return EDERR_NOMEMORY;
 	work->copiedPolygons++;
+	if (!(info->flags & PPDF_CURVE))
+		work->copiedFaces++;
 	return EDERR_NONE;
 }
-
 static EDError
 copy_instance(InstanceWork *work, unsigned int *state)
 {
@@ -307,6 +327,8 @@ post_options(GlobalFunc *global)
 	if (!request)
 		return 0;
 	dialog = (*request->create)("Instancer");
+	if (!dialog)
+		return 0;
 	desc.type = DY_FLOAT;
 	for (i = 0; i < 8; i++) {
 		controls[i] = (*request->addCtrl)(dialog, labels[i], &desc);
@@ -366,13 +388,13 @@ static EDError
 run_instancer(GlobalFunc *global, MeshEditBegin *local, int quiet)
 {
 	MeshEditOp *op;
+	static InstanceWork work;
+	static char report[96];
 	MessageFuncs *message;
-	InstanceWork work;
 	EDError error = EDERR_NONE;
 	unsigned int state;
 	int sourcePolygons;
 	int i;
-	char report[96];
 	int reportPos = 0;
 
 	message = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
@@ -394,7 +416,7 @@ run_instancer(GlobalFunc *global, MeshEditBegin *local, int quiet)
 	work.targetIndex = 0;
 	work.maxPolygonPoints = 0;
 	work.copiedPolygons = 0;
-
+	work.copiedFaces = 0;
 	if (work.pointCount < 1 || work.targetCount < 1) {
 		(*op->done)(op->state, EDERR_NONE, 0);
 		if (!quiet)
@@ -434,7 +456,7 @@ run_instancer(GlobalFunc *global, MeshEditBegin *local, int quiet)
 		if (error) goto finish;
 	}
 
-	sourcePolygons = work.targetCount ? work.copiedPolygons / work.targetCount : 0;
+	sourcePolygons = work.targetCount ? work.copiedFaces / work.targetCount : 0;
 	if (!quiet)
 		(*message->info)("Instancer", "Instances completed. See details in the next message.");
 	report[0] = '\0';
@@ -465,6 +487,56 @@ finish:
 	return error;
 }
 
+
+/* Batch argument: nine numbers override the remembered settings in the
+ * order hmin hmax pmin pmax bmin bmax smin smax seed. Anything else (or
+ * nothing) keeps the settings from the last interactive run. */
+static const char *
+parse_double(const char *text, double *value, int *found)
+{
+	double number = 0.0, scale = 0.1;
+	int negative = 0, digits = 0, dot = 0;
+
+	while (*text == ' ') text++;
+	if (*text == '-') { negative = 1; text++; }
+	while ((*text >= '0' && *text <= '9') || *text == '.') {
+		if (*text == '.') {
+			if (dot) break;
+			dot = 1;
+		} else if (!dot) {
+			number = number * 10.0 + (*text - '0');
+			digits = 1;
+		} else {
+			number += (*text - '0') * scale;
+			scale *= 0.1;
+			digits = 1;
+		}
+		text++;
+	}
+	if (negative) number = -number;
+	*found = digits;
+	*value = number;
+	return text;
+}
+
+static void
+apply_batch_argument(const char *argument)
+{
+	double v[9];
+	int found = 0, i;
+
+	if (!argument) return;
+	for (i = 0; i < 9; i++) {
+		argument = parse_double(argument, &v[i], &found);
+		if (!found) return;
+	}
+	headingMin = v[0]; headingMax = v[1];
+	pitchMin = v[2]; pitchMax = v[3];
+	bankMin = v[4]; bankMax = v[5];
+	scaleMin = v[6]; scaleMax = v[7];
+	randomSeed = (int)v[8];
+}
+
 XCALL_(static int)
 CmdActivate(long version, GlobalFunc *global, ModCommand *local, void *serverData)
 {
@@ -473,9 +545,11 @@ CmdActivate(long version, GlobalFunc *global, ModCommand *local, void *serverDat
 		return AFUNC_BADVERSION;
 	if (!local || !local->editBegin)
 		return AFUNC_BADLOCAL;
-	/* An argument (any text) selects unattended use: the settings dialog is
-	 * skipped and the settings remembered from the last interactive run
-	 * (or the defaults) are used. */
+	/* An argument selects unattended use: the settings dialog is skipped.
+	 * Nine numbers in the argument also override the rotation, scale and
+	 * seed settings (see apply_batch_argument). */
+	if (local->argument && local->argument[0])
+		apply_batch_argument(local->argument);
 	run_instancer(global, local->editBegin,
 	              local->argument && local->argument[0]);
 	return AFUNC_OK;

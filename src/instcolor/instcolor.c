@@ -154,10 +154,10 @@ hsv_to_rgb(const double hsv[3], double rgb[3])
 	c = value * saturation;
 	sector = (int)(hue / 60.0);
 	fraction = hue / 60.0 - sector;
-	if (fraction < 0.5)
-		x = c * (fraction * 2.0);
+	if ((sector & 1) == 0)
+		x = c * fraction;
 	else
-		x = c * ((1.0 - fraction) * 2.0);
+		x = c * (1.0 - fraction);
 	m = value - c;
 	if (sector == 0) { rgb[0] = c; rgb[1] = x; rgb[2] = 0.0; }
 	else if (sector == 1) { rgb[0] = x; rgb[1] = c; rgb[2] = 0.0; }
@@ -203,7 +203,7 @@ Copy(InstanceColor *from, InstanceColor *to)
 XCALL_(static LWError)
 Load(InstanceColor *instance, const LWLoadState *load)
 {
-	char buffer[96];
+	static char buffer[96];
 	const char *text;
 	int version;
 	XCALL_INIT;
@@ -227,13 +227,20 @@ Load(InstanceColor *instance, const LWLoadState *load)
 		if (!spi_read_i32be(load, &instance->multiply)) return 0;
 	}
 	if (instance->polygonsPerInstance < 1) instance->polygonsPerInstance = 1;
+	if (instance->hueRange < 0) instance->hueRange = 0;
+	if (instance->hueRange > 180) instance->hueRange = 180;
+	if (instance->saturationRange < 0) instance->saturationRange = 0;
+	if (instance->saturationRange > 100) instance->saturationRange = 100;
+	if (instance->valueRange < 0) instance->valueRange = 0;
+	if (instance->valueRange > 100) instance->valueRange = 100;
+	instance->multiply = instance->multiply ? 1 : 0;
 	return 0;
 }
 
 XCALL_(static LWError)
 Save(InstanceColor *instance, const LWSaveState *save)
 {
-	char buffer[96];
+	static char buffer[96];
 	int position = 0;
 	XCALL_INIT;
 	if (save->ioMode == LWIO_SCENE) {
