@@ -277,9 +277,9 @@ XCALL_(static LWError) Copy(NormalMapInst *from, NormalMapInst *to)
 
 static void load_v1_scene(NormalMapInst *inst, const char *line, const LWLoadState *ls)
 {
-	char name[NMAP_MAX_NAME];
 	const char *p = line;
 	int version;
+	char *slot = inst->map[NMAP_SLOT_NORMAL].imageName;
 	p = parse_int(p, &version);
 
 	p = parse_int(p, &inst->projection);
@@ -287,10 +287,10 @@ static void load_v1_scene(NormalMapInst *inst, const char *line, const LWLoadSta
 	p = parse_int(p, &inst->tileY);
 	p = parse_int(p, &inst->strength);
 	parse_int(p, &inst->flipY);
-	if (spi_read_line(ls, name, sizeof(name)) && name[0]) {
-		strncpy(inst->map[NMAP_SLOT_NORMAL].imageName, name, NMAP_MAX_NAME - 1);
-		inst->map[NMAP_SLOT_NORMAL].imageName[NMAP_MAX_NAME - 1] = '\0';
-	}
+	/* Read straight into instance storage: this runs on the callback
+	 * stack while Load's own line buffer is live. */
+	slot[0] = '\0';
+	if (spi_read_line(ls, slot, NMAP_MAX_NAME) && !slot[0]) slot[0] = '\0';
 }
 /* Object SDAT strings are length-prefixed.  An empty record is a valid
  * unassigned map slot, so its zero length must not be treated as an error. */
@@ -545,9 +545,11 @@ static void sample_map(NormalMapInst *inst, const MapSlot *slot,
 		sample_axis(inst, slot, inst->projection, pos, rgb);
 		return;
 	}
-	sample_axis(inst, slot, NMAP_PROJ_XY, pos, inst->scratch.sample[0]);
-	sample_axis(inst, slot, NMAP_PROJ_XZ, pos, inst->scratch.sample[1]);
-	sample_axis(inst, slot, NMAP_PROJ_YZ, pos, inst->scratch.sample[2]);
+	/* Mirror V on the same faces as the normal path so every map in the
+	 * set samples identical coordinates on each projected plane. */
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_XY, pos, normal[2] < 0.0, inst->scratch.sample[0]);
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_XZ, pos, normal[1] >= 0.0, inst->scratch.sample[1]);
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_YZ, pos, normal[0] < 0.0, inst->scratch.sample[2]);
 	wx = tri_weight(normal[0], inst->boxSharpness);
 	wy = tri_weight(normal[1], inst->boxSharpness);
 	wz = tri_weight(normal[2], inst->boxSharpness);
@@ -741,9 +743,17 @@ XCALL_(static const char *) DescLn(NormalMapInst *inst)
 {
 	int i;
 	XCALL_INIT;
-	if (!inst->map[NMAP_SLOT_NORMAL].imageName[0]) return "(no image)";
-	strncpy(descBuf, inst->map[NMAP_SLOT_NORMAL].imageName, 40); descBuf[40] = '\0';
-	i = (int)strlen(descBuf); descBuf[i++] = ' '; int_to_str(inst->strength, descBuf + i, sizeof(descBuf) - i); i = (int)strlen(descBuf); descBuf[i++] = '%'; descBuf[i] = '\0';
+	for (i = 0; i < NMAP_SLOT_COUNT; i++)
+		if (inst->map[i].imageName[0]) break;
+	if (i == NMAP_SLOT_COUNT) return "(no image)";
+	strncpy(descBuf, inst->map[i].imageName, 40); descBuf[40] = '\0';
+	if (i == NMAP_SLOT_NORMAL) {
+		int n = (int)strlen(descBuf);
+		descBuf[n++] = ' ';
+		int_to_str(inst->strength, descBuf + n, sizeof(descBuf) - n);
+		n = (int)strlen(descBuf);
+		descBuf[n++] = '%'; descBuf[n] = '\0';
+	}
 	return descBuf;
 }
 
