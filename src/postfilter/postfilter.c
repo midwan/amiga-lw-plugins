@@ -395,14 +395,17 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 	unsigned long pixel;
 	unsigned char *front = 0, *back = 0, *mask = 0, *gammaTable = 0;
 	int x, y, pass;
+	int needBack;
 	unsigned long random = 0x13579BDF;
 	XCALL_INIT;
 	if (fa->width <= 0 || fa->height <= 0) return;
 	pixels = (unsigned long)fa->width * (unsigned long)fa->height;
+	needBack = inst->enableBlur || inst->enableSmooth ||
+		(inst->enableSharpen && inst->sharpen);
 	front = (unsigned char *)plugin_alloc(pixels * 3);
-	back = (unsigned char *)plugin_alloc(pixels * 3);
+	if (needBack) back = (unsigned char *)plugin_alloc(pixels * 3);
 	mask = (unsigned char *)plugin_alloc(pixels);
-	if (!front || !back || !mask) goto done;
+	if (!front || !mask || (needBack && !back)) goto done;
 	if (inst->enableColor) {
 		gammaTable = (unsigned char *)plugin_alloc(256);
 		if (!gammaTable) goto done;
@@ -448,9 +451,11 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 			if (inst->greyscale) r = g = b = (r * 77 + g * 150 + b * 29) >> 8;
 			if (inst->negative) { r = 255 - r; g = 255 - g; b = 255 - b; }
 			if (inst->posterize >= 2) {
-				r = (r * (inst->posterize - 1) / 255) * 255 / (inst->posterize - 1);
-				g = (g * (inst->posterize - 1) / 255) * 255 / (inst->posterize - 1);
-				b = (b * (inst->posterize - 1) / 255) * 255 / (inst->posterize - 1);
+				/* Nearest-level quantisation: equal-width input bands, so
+				 * the brightest output level is reachable below 255. */
+				r = ((r * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
+				g = ((g * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
+				b = ((b * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
 			}
 			front[base] = (unsigned char)CLAMP_BYTE(r);
 			front[base + 1] = (unsigned char)CLAMP_BYTE(g);
