@@ -180,5 +180,6 @@
 
 (exit
 	"The plugins are in " #dest ".\n\n"
+	"To register a new plugin, start Layout without loading a scene, open Options > Add Plug-ins, select the .p file, then restart Layout. "
 	"Register GEOimport and Instancer the same way in Modeler (Add Plug-Ins in the Menu layout), then restart Modeler. "
 	"Plugins that are already registered under the same file name pick up the new build on the next start.")
