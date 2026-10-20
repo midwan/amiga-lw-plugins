@@ -80,6 +80,8 @@
 
 ; Installer 43.x returns only the choices that fit its fixed window (nine
 ; lines), so related plugins share one entry to keep the list at eight.
+; Keep each label to one line (about 44 characters): a wrapped label
+; pushes the last choice onto a second page.
 (set #plugins
 	(if (= @user-level 0)
 		255
@@ -87,8 +89,8 @@
 			(prompt "Select the plugins to install.")
 			(help "All plugins are selected by default. Each one is described in the documentation drawer.")
 			(choices
-				"ObjSwap + ObjList + ObjMeshSwap (object replacement)"
-				"Fresnel + SurfList (shaders)"
+				"ObjSwap + ObjList + ObjMeshSwap (replacers)"
+				"Fresnel + SurfList + InstanceColor (shaders)"
 				"PBR (shader)"
 				"NormalMap (shader)"
 				"SpecFlare + PostFilter (image filters)"
@@ -112,6 +114,7 @@
 (set #bit 0 #file "objlist2.p") (P_Plugin)
 (set #bit 1 #file "fresnel.p") (P_Plugin)
 (set #bit 1 #file "surflist.p") (P_Plugin)
+(set #bit 1 #file "instcolor.p") (P_Plugin)
 (set #bit 2 #file "pbr.p") (P_Plugin)
 (set #bit 3 #file "normalmap.p") (P_Plugin)
 (set #bit 4 #file "specflare.p") (P_Plugin)
@@ -123,9 +126,9 @@
 (set #bit 7 #file "pngsaver.p") (P_Plugin)
 
 ; --------------------------------------------------------------------
-; GEOimport is an object loader for Modeler, so it goes into the Modeler
-; plug-ins drawer, by default the "Modeler" drawer next to #dest. It has
-; its own question because askoptions above is full.
+; Modeler plugins are installed into the Modeler plug-ins drawer, by default
+; the "Modeler" drawer next to #dest. They have their own question because
+; askoptions above is full.
 
 (set #moddest (tackon (pathonly #dest) "Modeler"))
 (if (NOT (exists #moddest (noreq)))
@@ -133,19 +136,24 @@
 
 (if
 	(askbool
-		(prompt "Install GEOimport, the VideoScape 3D (.geo) object loader for Modeler?")
-		(help "GEOimport loads VideoScape 3D and Aegis Modeler 3D .geo objects into Modeler. It is installed into the Modeler plug-ins drawer.")
+		(prompt "Install GEOimport and Instancer for Modeler?")
+		(help "GEOimport loads VideoScape 3D .geo objects. Instancer copies foreground geometry onto background-layer points. Both are installed into the Modeler plug-ins drawer.")
 		(default 1))
 	(
 		(set #moddest
 			(askdir
-				(prompt "Where should GEOimport be installed?")
-				(help "Choose the drawer that holds your LightWave Modeler plug-ins, for example Toaster:Programs/Plug-Ins/Modeler. An existing geoimport.p is replaced.")
+				(prompt "Where should Modeler plugins be installed?")
+				(help "Choose the drawer that holds your LightWave Modeler plug-ins, for example Toaster:Programs/Plug-Ins/Modeler. Existing plugin files are replaced.")
 				(default #moddest)))
 		(copyfiles
 			(prompt "Install geoimport.p")
 			(help @copyfiles-help)
 			(source (tackon #srcdir "geoimport.p"))
+			(dest #moddest))
+		(copyfiles
+			(prompt "Install instancer.p")
+			(help @copyfiles-help)
+			(source (tackon #srcdir "instancer.p"))
 			(dest #moddest))))
 
 (complete 80)
@@ -179,5 +187,5 @@
 (exit
 	"The plugins are in " #dest ".\n\n"
 	"To register a new plugin, start Layout without loading a scene, open Options > Add Plug-ins, select the .p file, then restart Layout. "
-	"Register GEOimport the same way in Modeler (Add Plug-Ins in the Menu layout), then restart Modeler. "
+	"Register GEOimport and Instancer the same way in Modeler (Add Plug-Ins in the Menu layout), then restart Modeler. "
 	"Plugins that are already registered under the same file name pick up the new build on the next start.")
