@@ -1,45 +1,82 @@
 /*
- * NORMALMAP.C -- Normal Map Shader Plugin for LightWave 3D
- *
- * Samples an image loaded in LightWave's image list and uses it as a
- * tangent-space normal map to perturb surface normals at render time.
- * Supports planar projection (XY/XZ/YZ) with tiling, offset, and
- * adjustable strength.  Pairs well with the PBR and Fresnel plugins
- * for a full modern material stack on LightWave 5.x.
- *
- * Uses AllocMem/FreeMem and custom helpers -- no libnix runtime.
+ * NORMALMAP.C -- projected normal and material-map shader for LightWave 3D.
+ * Uses only AllocMem/FreeMem; no libnix heap or stdio runtime is available.
  */
-
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
 #include <lwmath.h>
 #include <safe_pluginio.h>
-
 #include <string.h>
-
 #include <proto/exec.h>
 #include <exec/memory.h>
 
 extern struct ExecBase *SysBase;
 extern double sqrt(double);
+extern double pow(double, double);
 
-/* ----------------------------------------------------------------
- * Memory helpers
- * ---------------------------------------------------------------- */
+#define NMAP_MAX_NAME 128
+#define NMAP_MAX_POPUP_IMAGES 32
+#define NMAP_PROJ_XY 0
+#define NMAP_PROJ_XZ 1
+#define NMAP_PROJ_YZ 2
+#define NMAP_PROJ_BOX 3
+#define NMAP_NUM_PROJ 4
+#define NMAP_OBJECT_VERSION 2
+#define NMAP_SLOT_NORMAL 0
+#define NMAP_SLOT_ALBEDO 1
+#define NMAP_SLOT_ROUGHNESS 2
+#define NMAP_SLOT_METALLIC 3
+#define NMAP_SLOT_AO 4
+#define NMAP_SLOT_SPECULAR 5
+#define NMAP_SLOT_COUNT 6
+#define NMAP_ALBEDO_MULTIPLY 0
+#define NMAP_ALBEDO_REPLACE 1
 
-static void *
-plugin_alloc(unsigned long size)
+typedef struct {
+	LWImageID imageID;
+	char imageName[NMAP_MAX_NAME];
+	unsigned char *data;
+	int width, height;
+} MapSlot;
+
+typedef struct {
+	/* Render callbacks have a small stack.  All vector scratch is instance
+	 * state so Evaluate and its helpers use only scalar locals. */
+	double sample[3][3];
+	double objectNormal[3];
+	double objectGeomNormal[3];
+	double worldNormal[3];
+} NormalMapScratch;
+
+typedef struct {
+	MapSlot map[NMAP_SLOT_COUNT];
+	NormalMapScratch scratch;
+	int projection;
+	int tileX, tileY;
+	int strength;
+	int flipY;
+	int boxSharpness;
+	int albedoAmount;
+	int albedoMode;
+	int roughnessAmount;
+	int metallicAmount;
+	int aoAmount;
+	int specularAmount;
+} NormalMapInst;
+
+static MessageFuncs *msg;
+static GlobalFunc *gfunc;
+
+static void *plugin_alloc(unsigned long size)
 {
-	unsigned long *p;
-	p = (unsigned long *)AllocMem(size + 4, MEMF_PUBLIC | MEMF_CLEAR);
+	unsigned long *p = (unsigned long *)AllocMem(size + 4, MEMF_PUBLIC | MEMF_CLEAR);
 	if (!p) return 0;
 	*p = size + 4;
-	return (void *)(p + 1);
+	return p + 1;
 }
 
-static void
-plugin_free(void *ptr)
+static void plugin_free(void *ptr)
 {
 	unsigned long *p;
 	if (!ptr) return;
@@ -47,655 +84,851 @@ plugin_free(void *ptr)
 	FreeMem(p, *p);
 }
 
-/* ----------------------------------------------------------------
- * Integer/string helpers (avoid libnix sprintf/sscanf)
- * ---------------------------------------------------------------- */
-
-static void
-int_to_str(int val, char *buf, int buflen)
+static void int_to_str(int val, char *buf, int buflen)
 {
 	char tmp[12];
-	int  i = 0, neg = 0, len;
-
+	int i = 0, neg = 0, len, j;
 	if (val < 0) { neg = 1; val = -val; }
-	if (val == 0) { tmp[i++] = '0'; }
-	else {
-		while (val > 0 && i < 11) {
-			tmp[i++] = (char)('0' + (val % 10));
-			val /= 10;
-		}
-	}
+	if (val == 0) tmp[i++] = '0';
+	while (val > 0 && i < 11) { tmp[i++] = (char)('0' + val % 10); val /= 10; }
 	len = neg + i;
 	if (len >= buflen) len = buflen - 1;
 	if (neg) buf[0] = '-';
-	{
-		int j;
-		for (j = 0; j < i && (neg + j) < buflen - 1; j++)
-			buf[neg + j] = tmp[i - 1 - j];
-	}
+	for (j = 0; j < i && neg + j < buflen - 1; j++) buf[neg + j] = tmp[i - 1 - j];
 	buf[len] = '\0';
 }
 
-static const char *
-parse_int(const char *s, int *val)
+static const char *parse_int(const char *s, int *val)
 {
 	int neg = 0;
 	*val = 0;
 	while (*s == ' ') s++;
 	if (*s == '-') { neg = 1; s++; }
-	while (*s >= '0' && *s <= '9') {
-		*val = *val * 10 + (*s - '0');
-		s++;
-	}
+	while (*s >= '0' && *s <= '9') { *val = *val * 10 + (*s - '0'); s++; }
 	if (neg) *val = -*val;
 	return s;
 }
 
-static void
-append_int(char *buf, int *pos, int val)
+static void append_int(char *buf, int *pos, int val)
 {
 	char tmp[12];
 	int i;
-	int_to_str(val, tmp, 12);
-	if (*pos > 0) buf[(*pos)++] = ' ';
-	for (i = 0; tmp[i]; i++)
-		buf[(*pos)++] = tmp[i];
+	int_to_str(val, tmp, sizeof(tmp));
+	if (*pos) buf[(*pos)++] = ' ';
+	for (i = 0; tmp[i]; i++) buf[(*pos)++] = tmp[i];
 	buf[*pos] = '\0';
 }
 
-/* ----------------------------------------------------------------
- * Math helpers
- * ---------------------------------------------------------------- */
-
-static void
-vec_normalize(double v[3])
+static void vec_normalize(double v[3])
 {
-	double len = sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
-	if (len > 0.00001) {
-		v[0] /= len;
-		v[1] /= len;
-		v[2] /= len;
-	}
+	double len = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+	if (len > 0.00001) { v[0] /= len; v[1] /= len; v[2] /= len; }
 }
 
-static double
-my_floor(double x)
+static double my_floor(double x)
 {
 	int i = (int)x;
 	if (x < 0.0 && x != (double)i) i--;
 	return (double)i;
 }
 
-/* ----------------------------------------------------------------
- * Types
- * ---------------------------------------------------------------- */
+static double absd(double x) { return x < 0.0 ? -x : x; }
 
-#define NMAP_MAX_NAME 128
-
-#define NMAP_PROJ_XY   0   /* Front — U from X, V from Y */
-#define NMAP_PROJ_XZ   1   /* Top   — U from X, V from Z */
-#define NMAP_PROJ_YZ   2   /* Side  — U from Y, V from Z */
-#define NMAP_NUM_PROJ  3
-
-#define NMAP_OBJECT_VERSION  1
-
-typedef struct {
-	LWImageID  imageID;              /* runtime only (not saved) */
-	char       imageName[NMAP_MAX_NAME]; /* persisted name for reload */
-	int        projection;           /* NMAP_PROJ_* */
-	int        tileX;               /* tiling factor X  (100 = 1.0) */
-	int        tileY;               /* tiling factor Y  (100 = 1.0) */
-	int        strength;            /* 0 - 100 */
-	int        flipY;               /* flip green channel (DX normals) */
-
-	/* Pre-loaded image data (populated in Init, freed in Cleanup).
-	 * We copy the image into our own buffer so Evaluate never
-	 * calls any LW globals — those are not safe during rendering. */
-	unsigned char *mapData;          /* RGB triplets, row-major */
-	int            mapW, mapH;
-} NormalMapInst;
-
-/* ----------------------------------------------------------------
- * Globals
- * ---------------------------------------------------------------- */
-
-static MessageFuncs *msg;
-static GlobalFunc   *gfunc;
-
-/* ----------------------------------------------------------------
- * Image list helpers
- * ---------------------------------------------------------------- */
-
-/* Try to resolve an image by its display name (uses gfunc transient) */
-static LWImageID
-find_image_by_name(const char *name)
+static void clear_slot(MapSlot *slot)
 {
-	LWImageList *il;
-	LWImageID id;
-
-	if (!gfunc || !name || !name[0]) return 0;
-
-	il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
-	if (!il) return 0;
-
-	id = (*il->first)();
-	while (id) {
-		const char *n = (*il->name)(id);
-		if (n && strcmp(n, name) == 0)
-			return id;
-		id = (*il->next)(id);
-	}
-	return 0;
+	if (slot->data) plugin_free(slot->data);
+	slot->data = 0;
+	slot->width = slot->height = 0;
 }
 
-/* ----------------------------------------------------------------
- * Handler callbacks
- * ---------------------------------------------------------------- */
+static void init_defaults(NormalMapInst *inst)
+{
+	int i;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		inst->map[i].imageID = 0;
+		inst->map[i].imageName[0] = '\0';
+		inst->map[i].data = 0;
+		inst->map[i].width = inst->map[i].height = 0;
+	}
+	inst->projection = NMAP_PROJ_XY;
+	inst->tileX = inst->tileY = 100;
+	inst->strength = 100;
+	inst->flipY = 0;
+	inst->boxSharpness = 2;
+	inst->albedoAmount = 100;
+	inst->albedoMode = NMAP_ALBEDO_REPLACE;
+	inst->roughnessAmount = 100;
+	inst->metallicAmount = 100;
+	inst->aoAmount = 100;
+	inst->specularAmount = 100;
+}
 
-XCALL_(static LWInstance)
-Create(LWError *err)
+static const char *base_name(const char *path)
+{
+	const char *b = path, *p;
+	if (!path) return 0;
+	for (p = path; *p; p++)
+		if (*p == ':' || *p == '/' || *p == '\\') b = p + 1;
+	return b;
+}
+
+static int base_name_equal(const char *stored, const char *listed)
+{
+	const char *a, *b;
+	if (!stored || !listed) return 0;
+	/* Layout may list an image without its volume or path prefix. */
+	a = base_name(stored); b = base_name(listed);
+	while (*a && *b) {
+		char ca = *a++, cb = *b++;
+		if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+		if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+		if (ca != cb) return 0;
+	}
+	return *a == '\0' && *b == '\0';
+}
+
+static LWImageID find_image_by_name(const char *name)
+{
+	LWImageList *il;
+	LWImageID id, baseMatch = 0;
+	int baseCount = 0;
+	if (!gfunc || !name || !name[0]) return 0;
+	il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
+	if (!il) return 0;
+	/* Exact match wins; a basename match binds only when unique. */
+	for (id = (*il->first)(); id; id = (*il->next)(id)) {
+		const char *n = (*il->name)(id);
+		if (!n) continue;
+		if (strcmp(n, name) == 0) return id;
+		if (!baseMatch && base_name_equal(name, n)) baseMatch = id;
+		if (base_name_equal(name, n)) baseCount++;
+	}
+	return baseCount == 1 ? baseMatch : 0;
+}
+
+static void refresh_name(MapSlot *slot)
+{
+	LWImageList *il;
+	const char *n;
+	if (!slot->imageID || !gfunc) return;
+	il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
+	if (!il) return;
+	n = (*il->name)(slot->imageID);
+	if (n) {
+		strncpy(slot->imageName, n, NMAP_MAX_NAME - 1);
+		slot->imageName[NMAP_MAX_NAME - 1] = '\0';
+	}
+}
+
+static void load_slot(MapSlot *slot, LWImageList *il)
+{
+	int x, y, w = 0, h = 0;
+	unsigned char *data;
+	clear_slot(slot);
+	if (!slot->imageID && slot->imageName[0]) slot->imageID = find_image_by_name(slot->imageName);
+	if (!slot->imageID || !il) return;
+	(*il->size)(slot->imageID, &w, &h);
+	if (w <= 0 || h <= 0) return;
+	data = (unsigned char *)plugin_alloc((unsigned long)w * (unsigned long)h * 3);
+	if (!data) return;
+	for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+		BufferValue rgb[3];
+		int at = (y * w + x) * 3;
+		(*il->RGB)(slot->imageID, x, y, rgb);
+		data[at] = rgb[0]; data[at + 1] = rgb[1]; data[at + 2] = rgb[2];
+	}
+	slot->data = data;
+	slot->width = w;
+	slot->height = h;
+}
+
+XCALL_(static LWInstance) Create(LWError *err)
 {
 	NormalMapInst *inst;
 	XCALL_INIT;
-
-	inst = (NormalMapInst *)plugin_alloc(sizeof(NormalMapInst));
+	inst = (NormalMapInst *)plugin_alloc(sizeof(*inst));
 	if (!inst) return 0;
-
-	inst->imageID    = 0;
-	inst->imageName[0] = '\0';
-	inst->projection = NMAP_PROJ_XY;
-	inst->tileX      = 100;
-	inst->tileY      = 100;
-	inst->strength   = 100;
-	inst->flipY      = 0;
-	inst->mapData    = 0;
-	inst->mapW       = 0;
-	inst->mapH       = 0;
-
+	init_defaults(inst);
 	return inst;
 }
 
-XCALL_(static void)
-Destroy(NormalMapInst *inst)
+XCALL_(static void) Destroy(NormalMapInst *inst)
 {
+	int i;
 	XCALL_INIT;
-	if (inst) {
-		if (inst->mapData) plugin_free(inst->mapData);
-		plugin_free(inst);
-	}
+	if (!inst) return;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) clear_slot(&inst->map[i]);
+	plugin_free(inst);
 }
 
-XCALL_(static LWError)
-Copy(NormalMapInst *from, NormalMapInst *to)
+XCALL_(static LWError) Copy(NormalMapInst *from, NormalMapInst *to)
 {
+	int i;
 	XCALL_INIT;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) clear_slot(&to->map[i]);
 	*to = *from;
+	/* Pixel buffers are render-time state, not instance state. */
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		to->map[i].data = 0;
+		to->map[i].width = to->map[i].height = 0;
+	}
 	return 0;
 }
 
-XCALL_(static LWError)
-Load(NormalMapInst *inst, const LWLoadState *ls)
+static void load_v1_scene(NormalMapInst *inst, const char *line, const LWLoadState *ls)
+{
+	const char *p = line;
+	int version;
+	char *slot = inst->map[NMAP_SLOT_NORMAL].imageName;
+	p = parse_int(p, &version);
+
+	p = parse_int(p, &inst->projection);
+	p = parse_int(p, &inst->tileX);
+	p = parse_int(p, &inst->tileY);
+	p = parse_int(p, &inst->strength);
+	parse_int(p, &inst->flipY);
+	/* Read straight into instance storage: this runs on the callback
+	 * stack while Load's own line buffer is live. */
+	slot[0] = '\0';
+	spi_read_line(ls, slot, NMAP_MAX_NAME);
+}
+/* Object SDAT strings are length-prefixed.  An empty record is a valid
+ * unassigned map slot, so its zero length must not be treated as an error. */
+static int read_object_string(const LWLoadState *ls, char *buf, int buflen)
+{
+	unsigned char bytes[4];
+	unsigned long len, keep, left;
+	char discard[16];
+
+	buf[0] = '\0';
+	if ((*ls->read)(ls->readData, (char *)bytes, 4) != 4) return 0;
+	len = ((unsigned long)bytes[0] << 24) | ((unsigned long)bytes[1] << 16) |
+		((unsigned long)bytes[2] << 8) | (unsigned long)bytes[3];
+	keep = len < (unsigned long)(buflen - 1) ? len : (unsigned long)(buflen - 1);
+	if (keep && (*ls->read)(ls->readData, buf, (int)keep) != (int)keep) return 0;
+	buf[keep] = '\0';
+	left = len - keep;
+	while (left) {
+		int count = left > sizeof(discard) ? (int)sizeof(discard) : (int)left;
+		if ((*ls->read)(ls->readData, discard, count) != count) return 0;
+		left -= (unsigned long)count;
+	}
+	return 1;
+}
+
+XCALL_(static LWError) Load(NormalMapInst *inst, const LWLoadState *ls)
 {
 	char buf[256];
 	const char *p;
-	int v;
+	int v, i;
 	XCALL_INIT;
-
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) clear_slot(&inst->map[i]);
+	init_defaults(inst);
 	if (ls->ioMode == LWIO_SCENE) {
-		/* Line 1: version + numeric params */
-		if (!spi_read_line(ls, buf, sizeof(buf)) || !buf[0])
-			return 0;
-
-		p = buf;
-		p = parse_int(p, &v);
-		if (v != NMAP_OBJECT_VERSION)
-			return 0;
-		p = parse_int(p, &inst->projection);
-		p = parse_int(p, &inst->tileX);
-		p = parse_int(p, &inst->tileY);
-		p = parse_int(p, &inst->strength);
-		p = parse_int(p, &inst->flipY);
-
-		/* Line 2: image name */
-		if (spi_read_line(ls, buf, sizeof(buf)) && buf[0])
-			strncpy(inst->imageName, buf, NMAP_MAX_NAME - 1);
-		else
-			inst->imageName[0] = '\0';
-		inst->imageName[NMAP_MAX_NAME - 1] = '\0';
+		if (!spi_read_line(ls, buf, sizeof(buf)) || !buf[0]) return 0;
+		p = parse_int(buf, &v);
+		if (v == 1) {
+			load_v1_scene(inst, buf, ls);
+		} else if (v == NMAP_OBJECT_VERSION) {
+			p = parse_int(p, &inst->projection);
+			p = parse_int(p, &inst->tileX); p = parse_int(p, &inst->tileY);
+			p = parse_int(p, &inst->strength); p = parse_int(p, &inst->flipY);
+			p = parse_int(p, &inst->boxSharpness); p = parse_int(p, &inst->albedoMode);
+			p = parse_int(p, &inst->albedoAmount); p = parse_int(p, &inst->roughnessAmount);
+			p = parse_int(p, &inst->metallicAmount); p = parse_int(p, &inst->aoAmount);
+			parse_int(p, &inst->specularAmount);
+			for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+				if (spi_read_line(ls, buf, sizeof(buf)) && buf[0]) {
+					strncpy(inst->map[i].imageName, buf, NMAP_MAX_NAME - 1);
+					inst->map[i].imageName[NMAP_MAX_NAME - 1] = '\0';
+				}
+			}
+		} else return 0;
 	} else {
-		if (!spi_read_i32be(ls, &v) || v != NMAP_OBJECT_VERSION)
-			return 0;
-		if (!spi_read_i32be(ls, &inst->projection)) return 0;
-		if (!spi_read_i32be(ls, &inst->tileX)) return 0;
-		if (!spi_read_i32be(ls, &inst->tileY)) return 0;
-		if (!spi_read_i32be(ls, &inst->strength)) return 0;
-		if (!spi_read_i32be(ls, &inst->flipY)) return 0;
-		if (!spi_read_string_record(ls, inst->imageName, NMAP_MAX_NAME))
-			inst->imageName[0] = '\0';
+		if (!spi_read_i32be(ls, &v)) return 0;
+		if (v == 1) {
+			if (!spi_read_i32be(ls, &inst->projection) || !spi_read_i32be(ls, &inst->tileX) ||
+				!spi_read_i32be(ls, &inst->tileY) || !spi_read_i32be(ls, &inst->strength) ||
+				!spi_read_i32be(ls, &inst->flipY) ||
+				!read_object_string(ls, inst->map[NMAP_SLOT_NORMAL].imageName, NMAP_MAX_NAME)) return 0;
+		} else if (v == NMAP_OBJECT_VERSION) {
+			if (!spi_read_i32be(ls, &inst->projection) || !spi_read_i32be(ls, &inst->tileX) ||
+				!spi_read_i32be(ls, &inst->tileY) || !spi_read_i32be(ls, &inst->strength) ||
+				!spi_read_i32be(ls, &inst->flipY) || !spi_read_i32be(ls, &inst->boxSharpness) ||
+				!spi_read_i32be(ls, &inst->albedoMode) || !spi_read_i32be(ls, &inst->albedoAmount) ||
+				!spi_read_i32be(ls, &inst->roughnessAmount) || !spi_read_i32be(ls, &inst->metallicAmount) ||
+				!spi_read_i32be(ls, &inst->aoAmount) || !spi_read_i32be(ls, &inst->specularAmount)) return 0;
+			for (i = 0; i < NMAP_SLOT_COUNT; i++)
+				if (!read_object_string(ls, inst->map[i].imageName, NMAP_MAX_NAME)) return 0;
+		} else return 0;
 	}
-
-	/* Try to reconnect the image */
-	inst->imageID = find_image_by_name(inst->imageName);
+	/* Damaged or hand-edited data must not reach the render loop with
+	 * out-of-range values (boxSharpness drives a per-pixel multiply loop). */
+	if (inst->projection < 0 || inst->projection >= NMAP_NUM_PROJ) inst->projection = NMAP_PROJ_XY;
+	if (inst->tileX < 1) inst->tileX = 1;
+	if (inst->tileX > 10000) inst->tileX = 10000;
+	if (inst->tileY < 1) inst->tileY = 1;
+	if (inst->tileY > 10000) inst->tileY = 10000;
+	if (inst->strength < 0) inst->strength = 0;
+	if (inst->strength > 100) inst->strength = 100;
+	if (inst->boxSharpness < 1) inst->boxSharpness = 1;
+	if (inst->boxSharpness > 8) inst->boxSharpness = 8;
+	if (inst->albedoMode < 0 || inst->albedoMode > 1) inst->albedoMode = NMAP_ALBEDO_REPLACE;
+	if (inst->albedoAmount < 0) inst->albedoAmount = 0;
+	if (inst->albedoAmount > 100) inst->albedoAmount = 100;
+	if (inst->roughnessAmount < 0) inst->roughnessAmount = 0;
+	if (inst->roughnessAmount > 100) inst->roughnessAmount = 100;
+	if (inst->metallicAmount < 0) inst->metallicAmount = 0;
+	if (inst->metallicAmount > 100) inst->metallicAmount = 100;
+	if (inst->aoAmount < 0) inst->aoAmount = 0;
+	if (inst->aoAmount > 100) inst->aoAmount = 100;
+	if (inst->specularAmount < 0) inst->specularAmount = 0;
+	if (inst->specularAmount > 100) inst->specularAmount = 100;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) inst->map[i].imageID = find_image_by_name(inst->map[i].imageName);
 	return 0;
 }
 
-XCALL_(static LWError)
-Save(NormalMapInst *inst, const LWSaveState *ss)
+XCALL_(static LWError) Save(NormalMapInst *inst, const LWSaveState *ss)
 {
 	char buf[256];
-	int pos = 0;
+	int p = 0, i, objectBytes = 13 * 4;
 	XCALL_INIT;
-
-	/* Refresh the stored name from the current image */
-	if (inst->imageID && gfunc) {
-		LWImageList *il = (LWImageList *)(*gfunc)("LW Image List",
-		                                           GFUSE_TRANSIENT);
-		if (il) {
-			const char *n = (*il->name)(inst->imageID);
-			if (n) {
-				strncpy(inst->imageName, n, NMAP_MAX_NAME - 1);
-				inst->imageName[NMAP_MAX_NAME - 1] = '\0';
-			}
-		}
-	}
-
-	append_int(buf, &pos, NMAP_OBJECT_VERSION);
-	append_int(buf, &pos, inst->projection);
-	append_int(buf, &pos, inst->tileX);
-	append_int(buf, &pos, inst->tileY);
-	append_int(buf, &pos, inst->strength);
-	append_int(buf, &pos, inst->flipY);
-
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) refresh_name(&inst->map[i]);
+	append_int(buf, &p, NMAP_OBJECT_VERSION); append_int(buf, &p, inst->projection);
+	append_int(buf, &p, inst->tileX); append_int(buf, &p, inst->tileY);
+	append_int(buf, &p, inst->strength); append_int(buf, &p, inst->flipY);
+	append_int(buf, &p, inst->boxSharpness); append_int(buf, &p, inst->albedoMode);
+	append_int(buf, &p, inst->albedoAmount); append_int(buf, &p, inst->roughnessAmount);
+	append_int(buf, &p, inst->metallicAmount); append_int(buf, &p, inst->aoAmount);
+	append_int(buf, &p, inst->specularAmount);
 	if (ss->ioMode == LWIO_SCENE) {
 		spi_write_line(ss, buf);
-		spi_write_line(ss, inst->imageName[0] ? inst->imageName : "");
+		for (i = 0; i < NMAP_SLOT_COUNT; i++) spi_write_line(ss, inst->map[i].imageName);
 	} else {
-		spi_write_i32be(ss, NMAP_OBJECT_VERSION);
-		spi_write_i32be(ss, inst->projection);
-		spi_write_i32be(ss, inst->tileX);
-		spi_write_i32be(ss, inst->tileY);
-		spi_write_i32be(ss, inst->strength);
-		spi_write_i32be(ss, inst->flipY);
-		spi_write_string_record(ss, inst->imageName[0] ? inst->imageName : "");
+		spi_write_i32be(ss, NMAP_OBJECT_VERSION); spi_write_i32be(ss, inst->projection);
+		spi_write_i32be(ss, inst->tileX); spi_write_i32be(ss, inst->tileY);
+		spi_write_i32be(ss, inst->strength); spi_write_i32be(ss, inst->flipY);
+		spi_write_i32be(ss, inst->boxSharpness); spi_write_i32be(ss, inst->albedoMode);
+		spi_write_i32be(ss, inst->albedoAmount); spi_write_i32be(ss, inst->roughnessAmount);
+		spi_write_i32be(ss, inst->metallicAmount); spi_write_i32be(ss, inst->aoAmount);
+		spi_write_i32be(ss, inst->specularAmount);
+		for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+			spi_write_string_record(ss, inst->map[i].imageName);
+			objectBytes += 4 + (int)strlen(inst->map[i].imageName);
+		}
+		/* LightWave 5.0 corrupts odd-length SDAT chunks. */
+		if (objectBytes & 1) {
+			char pad = 0;
+			(*ss->write)(ss->writeData, &pad, 1);
+		}
 	}
-
 	return 0;
 }
 
-XCALL_(static LWError)
-Init(NormalMapInst *inst)
+XCALL_(static LWError) Init(NormalMapInst *inst)
 {
 	LWImageList *il;
+	int i;
 	XCALL_INIT;
-
-	/* Free any previous buffer */
-	if (inst->mapData) {
-		plugin_free(inst->mapData);
-		inst->mapData = 0;
-		inst->mapW = inst->mapH = 0;
-	}
-
-	/* Get image list (transient — used only during Init) */
-	il = 0;
-	if (gfunc)
-		il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
-
-	/* Re-resolve the image by name if needed */
-	if (inst->imageName[0] && !inst->imageID && il) {
-		LWImageID id = (*il->first)();
-		while (id) {
-			const char *n = (*il->name)(id);
-			if (n && strcmp(n, inst->imageName) == 0) {
-				inst->imageID = id;
-				break;
-			}
-			id = (*il->next)(id);
-		}
-	}
-
-	/* Copy the image into our own buffer so Evaluate never
-	 * needs to call any LW globals during rendering. */
-	if (inst->imageID && il) {
-		int w = 0, h = 0;
-		(*il->size)(inst->imageID, &w, &h);
-		if (w > 0 && h > 0) {
-			unsigned char *buf;
-			buf = (unsigned char *)plugin_alloc(
-				(unsigned long)w * (unsigned long)h * 3);
-			if (buf) {
-				int x, y;
-				for (y = 0; y < h; y++) {
-					for (x = 0; x < w; x++) {
-						BufferValue rgb[3];
-						int idx = (y * w + x) * 3;
-						rgb[0] = rgb[1] = rgb[2] = 128;
-						(*il->RGB)(inst->imageID, x, y, rgb);
-						buf[idx]     = rgb[0];
-						buf[idx + 1] = rgb[1];
-						buf[idx + 2] = rgb[2];
-					}
-				}
-				inst->mapData = buf;
-				inst->mapW = w;
-				inst->mapH = h;
-			}
-		}
-	}
-
+	il = gfunc ? (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT) : 0;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) load_slot(&inst->map[i], il);
 	return 0;
 }
 
-XCALL_(static void)
-Cleanup(NormalMapInst *inst)
+XCALL_(static void) Cleanup(NormalMapInst *inst)
 {
+	int i;
 	XCALL_INIT;
-	if (inst->mapData) {
-		plugin_free(inst->mapData);
-		inst->mapData = 0;
-		inst->mapW = inst->mapH = 0;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) clear_slot(&inst->map[i]);
+}
+
+XCALL_(static LWError) NewTime(NormalMapInst *inst, LWFrame f, LWTime t)
+{
+	LWImageList *il;
+	int i;
+	XCALL_INIT;
+	il = gfunc ? (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT) : 0;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		clear_slot(&inst->map[i]);
+		load_slot(&inst->map[i], il);
 	}
-}
-
-XCALL_(static LWError)
-NewTime(NormalMapInst *inst, LWFrame f, LWTime t)
-{
-	XCALL_INIT;
 	return 0;
 }
 
-XCALL_(static unsigned int)
-Flags(NormalMapInst *inst)
+XCALL_(static unsigned int) Flags(NormalMapInst *inst)
 {
+	unsigned int f = 0;
 	XCALL_INIT;
-	if (inst->mapData && inst->strength > 0)
-		return LWSHF_NORMAL;
-	return 0;
+	if (inst->map[NMAP_SLOT_NORMAL].data && inst->strength) f |= LWSHF_NORMAL;
+	if (inst->map[NMAP_SLOT_ALBEDO].data && inst->albedoAmount) f |= LWSHF_COLOR;
+	if (inst->map[NMAP_SLOT_ROUGHNESS].data && inst->roughnessAmount) f |= LWSHF_ROUGH;
+	if (inst->map[NMAP_SLOT_METALLIC].data && inst->metallicAmount) f |= LWSHF_MIRROR | LWSHF_DIFFUSE | LWSHF_SPECULAR;
+	if (inst->map[NMAP_SLOT_AO].data && inst->aoAmount) f |= LWSHF_COLOR | LWSHF_DIFFUSE;
+	if (inst->map[NMAP_SLOT_SPECULAR].data && inst->specularAmount) f |= LWSHF_SPECULAR;
+	return f;
 }
 
-/* ----------------------------------------------------------------
- * Evaluate — sample our pre-loaded buffer and perturb wNorm
- *
- * No LW globals are called here — everything is pure math on
- * the pre-loaded mapData buffer.
- * ---------------------------------------------------------------- */
-
-XCALL_(static void)
-Evaluate(NormalMapInst *inst, ShaderAccess *sa)
+static void map_uv(const NormalMapInst *inst, int axis, const double pos[3], double *u, double *v)
 {
-	double u, v, tU, tV;
-	double mapR, mapG, mapB;
-	double nmx, nmy, nmz, str;
-	double N[3], T[3], B[3];
-	int px, py, idx;
+	switch (axis) {
+	case NMAP_PROJ_XZ: *u = pos[0]; *v = pos[2]; break;
+	case NMAP_PROJ_YZ: *u = pos[1]; *v = pos[2]; break;
+	default: *u = pos[0]; *v = pos[1]; break;
+	}
+	*u = *u * inst->tileX / 100.0;
+	*v = *v * inst->tileY / 100.0;
+	*u -= my_floor(*u);
+	*v -= my_floor(*v);
+}
 
-	XCALL_INIT;
+static void sample_2d(const MapSlot *slot, double u, double v, double rgb[3])
+{
+	int x0, y0, x1, y1, component;
+	double fx, fy, xmix, ymix, top, bottom;
 
-	if (!inst->mapData || inst->strength == 0)
+	if (!slot->data || slot->width < 1 || slot->height < 1) {
+		rgb[0] = rgb[1] = rgb[2] = 0.0;
 		return;
-
-	/* ---- Derive UV from object-space position ---- */
-	switch (inst->projection) {
-	case NMAP_PROJ_XZ:
-		u = sa->oPos[0]; v = sa->oPos[2]; break;
-	case NMAP_PROJ_YZ:
-		u = sa->oPos[1]; v = sa->oPos[2]; break;
-	default: /* NMAP_PROJ_XY */
-		u = sa->oPos[0]; v = sa->oPos[1]; break;
 	}
+	fx = u * slot->width;
+	fy = (1.0 - v) * slot->height;
+	if (fx >= slot->width) fx = 0.0;
+	if (fy >= slot->height) fy = 0.0;
+	x0 = (int)fx;
+	y0 = (int)fy;
+	x1 = x0 + 1;
+	y1 = y0 + 1;
+	if (x1 == slot->width) x1 = 0;
+	if (y1 == slot->height) y1 = 0;
+	xmix = fx - x0;
+	ymix = fy - y0;
+	for (component = 0; component < 3; component++) {
+		top = slot->data[(y0 * slot->width + x0) * 3 + component] / 255.0;
+		top += (slot->data[(y0 * slot->width + x1) * 3 + component] / 255.0 - top) * xmix;
+		bottom = slot->data[(y1 * slot->width + x0) * 3 + component] / 255.0;
+		bottom += (slot->data[(y1 * slot->width + x1) * 3 + component] / 255.0 - bottom) * xmix;
+		rgb[component] = top + (bottom - top) * ymix;
+	}
+}
 
-	/* Apply tiling */
-	tU = inst->tileX / 100.0;
-	tV = inst->tileY / 100.0;
-	if (tU < 0.01) tU = 0.01;
-	if (tV < 0.01) tV = 0.01;
-	u *= tU;
-	v *= tV;
+static double tri_weight(double normal, int sharpness)
+{
+	double weight = absd(normal);
+	int i;
+	for (i = 1; i < sharpness; i++) weight *= absd(normal);
+	return weight;
+}
 
-	/* Wrap to 0..1 */
-	u = u - my_floor(u);
-	v = v - my_floor(v);
+static void sample_axis_mirrored(const NormalMapInst *inst, const MapSlot *slot, int axis,
+	const double pos[3], int mirrorV, double rgb[3])
+{
+	double u, v;
+	map_uv(inst, axis, pos, &u, &v);
+	if (mirrorV) {
+		v = 1.0 - v;
+		if (v >= 1.0) v = 0.0;
+	}
+	sample_2d(slot, u, v, rgb);
+}
 
-	/* Convert to pixel coordinates and clamp */
-	px = (int)(u * (double)(inst->mapW - 1));
-	py = (int)((1.0 - v) * (double)(inst->mapH - 1));  /* flip V */
-	if (px < 0) px = 0;
-	if (px >= inst->mapW) px = inst->mapW - 1;
-	if (py < 0) py = 0;
-	if (py >= inst->mapH) py = inst->mapH - 1;
+static void sample_axis(const NormalMapInst *inst, const MapSlot *slot, int axis,
+	const double pos[3], double rgb[3])
+{
+	sample_axis_mirrored(inst, slot, axis, pos, 0, rgb);
+}
 
-	/* Sample from our pre-loaded buffer (no LW calls) */
-	idx = (py * inst->mapW + px) * 3;
-	mapR = (inst->mapData[idx]     / 255.0) * 2.0 - 1.0;
-	mapG = (inst->mapData[idx + 1] / 255.0) * 2.0 - 1.0;
-	mapB =  inst->mapData[idx + 2] / 255.0;
+static void sample_map(NormalMapInst *inst, const MapSlot *slot,
+	const double pos[3], const double normal[3], double rgb[3])
+{
+	double wx, wy, wz, total;
 
-	if (inst->flipY) mapG = -mapG;
-	if (mapB < 0.01) mapB = 0.01;
+	if (inst->projection != NMAP_PROJ_BOX) {
+		sample_axis(inst, slot, inst->projection, pos, rgb);
+		return;
+	}
+	/* Mirror V on the same faces as the normal path so every map in the
+	 * set samples identical coordinates on each projected plane. */
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_XY, pos, normal[2] < 0.0, inst->scratch.sample[0]);
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_XZ, pos, normal[1] >= 0.0, inst->scratch.sample[1]);
+	sample_axis_mirrored(inst, slot, NMAP_PROJ_YZ, pos, normal[0] < 0.0, inst->scratch.sample[2]);
+	wx = tri_weight(normal[0], inst->boxSharpness);
+	wy = tri_weight(normal[1], inst->boxSharpness);
+	wz = tri_weight(normal[2], inst->boxSharpness);
+	total = wx + wy + wz;
+	if (total < 0.00001) total = 1.0;
+	rgb[0] = (wz * inst->scratch.sample[0][0] + wy * inst->scratch.sample[1][0] + wx * inst->scratch.sample[2][0]) / total;
+	rgb[1] = (wz * inst->scratch.sample[0][1] + wy * inst->scratch.sample[1][1] + wx * inst->scratch.sample[2][1]) / total;
+	rgb[2] = (wz * inst->scratch.sample[0][2] + wy * inst->scratch.sample[1][2] + wx * inst->scratch.sample[2][2]) / total;
+}
 
-	str = inst->strength / 100.0;
-	nmx = mapR * str;
-	nmy = mapG * str;
-	nmz = mapB;
+static double luma(const double rgb[3])
+{
+	return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+}
 
-	/* ---- Build tangent frame from surface normal ---- */
-	N[0] = sa->wNorm[0];
-	N[1] = sa->wNorm[1];
-	N[2] = sa->wNorm[2];
+static void object_to_world(const ShaderAccess *sa, const double in[3], double out[3])
+{
+	/* Alias-safe: callers may pass in == out. */
+	double x = sa->oXfrm[0] * in[0] + sa->oXfrm[3] * in[1] + sa->oXfrm[6] * in[2];
+	double y = sa->oXfrm[1] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[7] * in[2];
+	double z = sa->oXfrm[2] * in[0] + sa->oXfrm[5] * in[1] + sa->oXfrm[8] * in[2];
+	out[0] = x; out[1] = y; out[2] = z;
+}
 
-	{
-		double ref[3];
-		if (N[0] > 0.9 || N[0] < -0.9) {
-			ref[0] = 0.0; ref[1] = 1.0; ref[2] = 0.0;
+static void world_to_object(const ShaderAccess *sa, const double in[3], double out[3])
+{
+	double x = sa->wXfrm[0] * in[0] + sa->wXfrm[3] * in[1] + sa->wXfrm[6] * in[2];
+	double y = sa->wXfrm[1] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[7] * in[2];
+	double z = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
+	out[0] = x; out[1] = y; out[2] = z;
+}
+
+static void axis_normal(int axis, const double rgb[3], int flipY, double sign, int mirrorV, double out[3])
+{
+	double x = rgb[0] * 2.0 - 1.0;
+	double y = rgb[1] * 2.0 - 1.0;
+	double z = rgb[2];
+	if (flipY) y = -y;
+	/* Mirrored sampling reverses the object-space V direction the
+	 * green tilt acts along. */
+	if (mirrorV) y = -y;
+	if (z < 0.01) z = 0.01;
+	if (axis == NMAP_PROJ_XZ) { out[0] = x; out[1] = sign * z; out[2] = y; }
+	else if (axis == NMAP_PROJ_YZ) { out[0] = sign * z; out[1] = x; out[2] = y; }
+	else { out[0] = x; out[1] = y; out[2] = sign * z; }
+	vec_normalize(out);
+}
+
+static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
+{
+	double wx, wy, wz, total, strength;
+	const double *normal = inst->scratch.objectGeomNormal;
+
+	if (!inst->map[NMAP_SLOT_NORMAL].data || !inst->strength) return;
+	if (inst->projection == NMAP_PROJ_BOX) {
+		/* Mirror the sampled V on faces whose U x V opposes the outward
+		 * normal, so sampled features and decoded slopes stay aligned. */
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XY, sa->oPos, normal[2] < 0.0, inst->scratch.sample[0]);
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XZ, sa->oPos, normal[1] >= 0.0, inst->scratch.sample[1]);
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_YZ, sa->oPos, normal[0] < 0.0, inst->scratch.sample[2]);
+		axis_normal(NMAP_PROJ_XY, inst->scratch.sample[0], inst->flipY, normal[2] < 0.0 ? -1.0 : 1.0, normal[2] < 0.0, inst->scratch.sample[0]);
+		axis_normal(NMAP_PROJ_XZ, inst->scratch.sample[1], inst->flipY, normal[1] < 0.0 ? -1.0 : 1.0, normal[1] >= 0.0, inst->scratch.sample[1]);
+		axis_normal(NMAP_PROJ_YZ, inst->scratch.sample[2], inst->flipY, normal[0] < 0.0 ? -1.0 : 1.0, normal[0] < 0.0, inst->scratch.sample[2]);
+		/* Reorient each plane's perturbation around the pre-perturbation
+		 * surface normal. A neutral normal map must leave it unchanged. */
+		inst->scratch.sample[0][0] += normal[0];
+		inst->scratch.sample[0][1] += normal[1];
+		inst->scratch.sample[0][2] += normal[2] - (normal[2] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[1][0] += normal[0];
+		inst->scratch.sample[1][1] += normal[1] - (normal[1] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[1][2] += normal[2];
+		inst->scratch.sample[2][0] += normal[0] - (normal[0] < 0.0 ? -1.0 : 1.0);
+		inst->scratch.sample[2][1] += normal[1];
+		inst->scratch.sample[2][2] += normal[2];
+		wx = tri_weight(normal[0], inst->boxSharpness);
+		wy = tri_weight(normal[1], inst->boxSharpness);
+		wz = tri_weight(normal[2], inst->boxSharpness);
+		total = wx + wy + wz;
+		if (total < 0.00001) total = 1.0;
+		inst->scratch.objectNormal[0] = (wz * inst->scratch.sample[0][0] + wy * inst->scratch.sample[1][0] + wx * inst->scratch.sample[2][0]) / total;
+		inst->scratch.objectNormal[1] = (wz * inst->scratch.sample[0][1] + wy * inst->scratch.sample[1][1] + wx * inst->scratch.sample[2][1]) / total;
+		inst->scratch.objectNormal[2] = (wz * inst->scratch.sample[0][2] + wy * inst->scratch.sample[1][2] + wx * inst->scratch.sample[2][2]) / total;
+	} else {
+		double *tangent = inst->scratch.sample[1];
+		double *bitangent = inst->scratch.sample[2];
+		double dot;
+		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], inst->projection, sa->oPos, inst->scratch.sample[0]);
+		inst->scratch.objectNormal[0] = inst->scratch.sample[0][0] * 2.0 - 1.0;
+		inst->scratch.objectNormal[1] = inst->scratch.sample[0][1] * 2.0 - 1.0;
+		inst->scratch.objectNormal[2] = inst->scratch.sample[0][2];
+		if (inst->flipY) inst->scratch.objectNormal[1] = -inst->scratch.objectNormal[1];
+		if (inst->scratch.objectNormal[2] < 0.01) inst->scratch.objectNormal[2] = 0.01;
+		/* Planar tangents come from the projection's own object-space U
+		 * and V axes, moved to world space and flattened onto the
+		 * surface so detail follows the sampled map directions. */
+		if (inst->projection == NMAP_PROJ_XZ) {
+			tangent[0] = 1.0; tangent[1] = 0.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 0.0; bitangent[2] = 1.0;
+		} else if (inst->projection == NMAP_PROJ_YZ) {
+			tangent[0] = 0.0; tangent[1] = 1.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 0.0; bitangent[2] = 1.0;
 		} else {
-			ref[0] = 1.0; ref[1] = 0.0; ref[2] = 0.0;
+			tangent[0] = 1.0; tangent[1] = 0.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 1.0; bitangent[2] = 0.0;
 		}
-		T[0] = N[1]*ref[2] - N[2]*ref[1];
-		T[1] = N[2]*ref[0] - N[0]*ref[2];
-		T[2] = N[0]*ref[1] - N[1]*ref[0];
+		object_to_world(sa, tangent, tangent);
+		object_to_world(sa, bitangent, bitangent);
+		dot = tangent[0] * sa->wNorm[0] + tangent[1] * sa->wNorm[1] + tangent[2] * sa->wNorm[2];
+		tangent[0] -= dot * sa->wNorm[0];
+		tangent[1] -= dot * sa->wNorm[1];
+		tangent[2] -= dot * sa->wNorm[2];
+		vec_normalize(tangent);
+		dot = bitangent[0] * sa->wNorm[0] + bitangent[1] * sa->wNorm[1] + bitangent[2] * sa->wNorm[2];
+		bitangent[0] -= dot * sa->wNorm[0];
+		bitangent[1] -= dot * sa->wNorm[1];
+		bitangent[2] -= dot * sa->wNorm[2];
+		dot = bitangent[0] * tangent[0] + bitangent[1] * tangent[1] + bitangent[2] * tangent[2];
+		bitangent[0] -= dot * tangent[0];
+		bitangent[1] -= dot * tangent[1];
+		bitangent[2] -= dot * tangent[2];
+		vec_normalize(bitangent);
+		inst->scratch.worldNormal[0] = inst->scratch.objectNormal[0] * tangent[0] + inst->scratch.objectNormal[1] * bitangent[0] + inst->scratch.objectNormal[2] * sa->wNorm[0];
+		inst->scratch.worldNormal[1] = inst->scratch.objectNormal[0] * tangent[1] + inst->scratch.objectNormal[1] * bitangent[1] + inst->scratch.objectNormal[2] * sa->wNorm[1];
+		inst->scratch.worldNormal[2] = inst->scratch.objectNormal[0] * tangent[2] + inst->scratch.objectNormal[1] * bitangent[2] + inst->scratch.objectNormal[2] * sa->wNorm[2];
 	}
-	vec_normalize(T);
-
-	B[0] = N[1]*T[2] - N[2]*T[1];
-	B[1] = N[2]*T[0] - N[0]*T[2];
-	B[2] = N[0]*T[1] - N[1]*T[0];
-	vec_normalize(B);
-
-	/* ---- Transform tangent-space normal to world space ---- */
-	sa->wNorm[0] = nmx * T[0] + nmy * B[0] + nmz * N[0];
-	sa->wNorm[1] = nmx * T[1] + nmy * B[1] + nmz * N[1];
-	sa->wNorm[2] = nmx * T[2] + nmy * B[2] + nmz * N[2];
+	if (inst->projection == NMAP_PROJ_BOX) {
+		object_to_world(sa, inst->scratch.objectNormal, inst->scratch.worldNormal);
+		vec_normalize(inst->scratch.worldNormal);
+	} else {
+		vec_normalize(inst->scratch.worldNormal);
+	}
+	strength = inst->strength / 100.0;
+	sa->wNorm[0] = sa->wNorm[0] * (1.0 - strength) + inst->scratch.worldNormal[0] * strength;
+	sa->wNorm[1] = sa->wNorm[1] * (1.0 - strength) + inst->scratch.worldNormal[1] * strength;
+	sa->wNorm[2] = sa->wNorm[2] * (1.0 - strength) + inst->scratch.worldNormal[2] * strength;
 	vec_normalize(sa->wNorm);
 }
 
-/* ----------------------------------------------------------------
- * Description line
- * ---------------------------------------------------------------- */
-
-static char descBuf[64];
-
-XCALL_(static const char *)
-DescLn(NormalMapInst *inst)
+XCALL_(static void) Evaluate(NormalMapInst *inst, ShaderAccess *sa)
 {
+	double *rgb = inst->scratch.sample[0];
+	double value, amount, oneMinusCos, fresnel;
+
 	XCALL_INIT;
-	if (inst->imageName[0]) {
-		int i;
-		strncpy(descBuf, inst->imageName, 40);
-		descBuf[40] = '\0';
-		/* Append strength */
-		i = (int)strlen(descBuf);
-		descBuf[i++] = ' ';
-		int_to_str(inst->strength, descBuf + i, (int)sizeof(descBuf) - i);
-		i = (int)strlen(descBuf);
-		descBuf[i++] = '%';
-		descBuf[i] = '\0';
-		return descBuf;
+	/* Use the unperturbed smoothed surface normal for box weights. */
+	world_to_object(sa, sa->wNorm, inst->scratch.objectGeomNormal);
+	vec_normalize(inst->scratch.objectGeomNormal);
+	apply_normal(inst, sa);
+	if (inst->map[NMAP_SLOT_ALBEDO].data && inst->albedoAmount) {
+		amount = inst->albedoAmount / 100.0;
+		sample_map(inst, &inst->map[NMAP_SLOT_ALBEDO], sa->oPos, inst->scratch.objectGeomNormal, rgb);
+		if (inst->albedoMode == NMAP_ALBEDO_REPLACE) {
+			sa->color[0] += (rgb[0] - sa->color[0]) * amount;
+			sa->color[1] += (rgb[1] - sa->color[1]) * amount;
+			sa->color[2] += (rgb[2] - sa->color[2]) * amount;
+		} else {
+			sa->color[0] *= 1.0 + (rgb[0] - 1.0) * amount;
+			sa->color[1] *= 1.0 + (rgb[1] - 1.0) * amount;
+			sa->color[2] *= 1.0 + (rgb[2] - 1.0) * amount;
+		}
 	}
-	return "(no image)";
+	if (inst->map[NMAP_SLOT_ROUGHNESS].data && inst->roughnessAmount) {
+		double gloss;
+		amount = inst->roughnessAmount / 100.0;
+		sample_map(inst, &inst->map[NMAP_SLOT_ROUGHNESS], sa->oPos, inst->scratch.objectGeomNormal, rgb);
+		/* sa->roughness is the reciprocal of the glossiness exponent
+		 * (measured in-host: GLOS 16 -> 0.0625, GLOS 256 -> 0.0039).
+		 * Map roughness 0..1 to exponent 4096..4 and write 1/E. */
+		gloss = pow(2.0, 10.0 * (1.0 - luma(rgb)) + 2.0);
+		sa->roughness += (1.0 / gloss - sa->roughness) * amount;
+	}
+	if (inst->map[NMAP_SLOT_METALLIC].data && inst->metallicAmount) {
+		amount = inst->metallicAmount / 100.0;
+		sample_map(inst, &inst->map[NMAP_SLOT_METALLIC], sa->oPos, inst->scratch.objectGeomNormal, rgb);
+	value = luma(rgb) * amount;
+	/* Fresnel follows the perturbed normal: rebuild the view dot from
+	 * the ray source instead of the read-only cosine field. */
+	{
+		double view[3], vlen;
+		view[0] = sa->raySource[0] - sa->wPos[0];
+		view[1] = sa->raySource[1] - sa->wPos[1];
+		view[2] = sa->raySource[2] - sa->wPos[2];
+		vlen = sqrt(view[0] * view[0] + view[1] * view[1] + view[2] * view[2]);
+		if (vlen > 0.000001) { view[0] /= vlen; view[1] /= vlen; view[2] /= vlen; }
+		oneMinusCos = 1.0 - absd(view[0] * sa->wNorm[0] + view[1] * sa->wNorm[1] + view[2] * sa->wNorm[2]);
+	}
+		if (oneMinusCos < 0.0) oneMinusCos = 0.0;
+		if (oneMinusCos > 1.0) oneMinusCos = 1.0;
+		fresnel = oneMinusCos * oneMinusCos;
+		fresnel = 0.04 + 0.96 * fresnel * fresnel * oneMinusCos;
+		sa->mirror += (1.0 - sa->mirror) * fresnel * value;
+		sa->specular += (1.0 - sa->specular) * fresnel * value;
+		sa->diffuse *= 1.0 - 0.95 * value;
+	}
+	if (inst->map[NMAP_SLOT_AO].data && inst->aoAmount) {
+		amount = inst->aoAmount / 100.0;
+		sample_map(inst, &inst->map[NMAP_SLOT_AO], sa->oPos, inst->scratch.objectGeomNormal, rgb);
+		value = 1.0 + (luma(rgb) - 1.0) * amount;
+		sa->color[0] *= value;
+		sa->color[1] *= value;
+		sa->color[2] *= value;
+		sa->diffuse *= value;
+	}
+	if (inst->map[NMAP_SLOT_SPECULAR].data && inst->specularAmount) {
+		amount = inst->specularAmount / 100.0;
+		sample_map(inst, &inst->map[NMAP_SLOT_SPECULAR], sa->oPos, inst->scratch.objectGeomNormal, rgb);
+		sa->specular += (luma(rgb) - sa->specular) * amount;
+	}
 }
 
-/* ----------------------------------------------------------------
- * Interface
- * ---------------------------------------------------------------- */
+static char descBuf[64];
+XCALL_(static const char *) DescLn(NormalMapInst *inst)
+{
+	int i;
+	XCALL_INIT;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++)
+		if (inst->map[i].imageName[0]) break;
+	if (i == NMAP_SLOT_COUNT) return "(no image)";
+	strncpy(descBuf, inst->map[i].imageName, 40); descBuf[40] = '\0';
+	if (i == NMAP_SLOT_NORMAL) {
+		int n = (int)strlen(descBuf);
+		descBuf[n++] = ' ';
+		int_to_str(inst->strength, descBuf + n, sizeof(descBuf) - n);
+		n = (int)strlen(descBuf);
+		descBuf[n++] = '%'; descBuf[n] = '\0';
+	}
+	return descBuf;
+}
 
-#define MAX_POPUP_IMAGES 32
+static const char *projNames[] = { "Planar XY", "Planar XZ", "Planar YZ", "Triplanar (box)", 0 };
+static const char *albedoModeNames[] = { "Multiply base colour", "Replace base colour", 0 };
+static const char *slotLabels[NMAP_SLOT_COUNT] = { "Normal image", "Albedo / Colour", "Roughness", "Metallic", "Ambient occlusion", "Specular" };
 
-static const char *projNames[] = { "Planar XY", "Planar XZ", "Planar YZ", 0 };
+static void select_popup_slot(NormalMapInst *inst, int slot, int index, int count, LWImageID *ids, const char **names)
+{
+	if (index > 0 && index <= count) {
+		inst->map[slot].imageID = ids[index - 1];
+		strncpy(inst->map[slot].imageName, names[index], NMAP_MAX_NAME - 1);
+		inst->map[slot].imageName[NMAP_MAX_NAME - 1] = '\0';
+	} else { inst->map[slot].imageID = 0; inst->map[slot].imageName[0] = '\0'; }
+}
 
-XCALL_(static int)
-Interface(
-	long       version,
-	GlobalFunc *global,
-	NormalMapInst *inst,
-	void       *serverData)
+XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *inst, void *serverData)
 {
 	LWPanelFuncs *panl;
-	LWPanelID     pan;
-	LWImageList  *il;
-	LWControl    *ctlImage, *ctlProj, *ctlTileX, *ctlTileY;
-	LWControl    *ctlStrength, *ctlFlipY;
-	const char   *imgItems[MAX_POPUP_IMAGES + 2];
-	LWImageID     imgIDs[MAX_POPUP_IMAGES];
-	int           imgCount = 0;
-	int           curImgIdx = 0;
+	LWPanelID pan;
+	LWImageList *il;
+	LWControl *image[NMAP_SLOT_COUNT], *projection, *tileX, *tileY, *strength, *flipY, *sharpness, *albedoMode;
+	LWControl *amount[NMAP_SLOT_COUNT];
+	/* Popup tables are static: the modal panel runs on a limited
+	 * callback stack and these arrays alone exceed its budget. */
+	static const char *items[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT + 2];
+	static LWImageID ids[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT];
+	static LWPanControlDesc desc;
+	static LWValue ival = { LWT_INTEGER };
+	static const char *amountLabels[] = { "Albedo amount", "Roughness amount", "Metallic amount", "AO amount", "Specular amount" };
+	int count = 0, current[NMAP_SLOT_COUNT], i, j, value, *a;
 
 	XCALL_INIT;
-	if (version != 1)
-		return AFUNC_BADVERSION;
-
-	msg  = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
+	if (version != 1) return AFUNC_BADVERSION;
+	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
 	panl = (LWPanelFuncs *)(*global)(PANEL_SERVICES_NAME, GFUSE_TRANSIENT);
-	il   = (LWImageList *)(*global)("LW Image List", GFUSE_TRANSIENT);
-
+	il = (LWImageList *)(*global)("LW Image List", GFUSE_TRANSIENT);
 	if (!panl) {
-		if (msg)
-			(*msg->info)("Normal Map", inst->imageName[0]
-				? inst->imageName : "(no image)");
+		if (msg) (*msg->info)("Normal Map", inst->map[0].imageName[0] ? inst->map[0].imageName : "(no image)");
 		return AFUNC_OK;
 	}
-
-	/* Build the image popup items */
-	imgItems[0] = "(None)";
+	items[0] = "(None)";
 	if (il) {
 		LWImageID id = (*il->first)();
-		while (id && imgCount < MAX_POPUP_IMAGES) {
-			const char *name = (*il->name)(id);
-			imgIDs[imgCount] = id;
-			imgItems[imgCount + 1] = name ? name : "?";
-			if (id == inst->imageID)
-				curImgIdx = imgCount + 1;
-			imgCount++;
+		while (id && count < NMAP_MAX_POPUP_IMAGES) {
+			const char *n = (*il->name)(id);
+			/* Skip unnamed images: a null entry would truncate the list. */
+			if (n) {
+				ids[count] = id;
+				items[count + 1] = n;
+				count++;
+			}
 			id = (*il->next)(id);
 		}
 	}
-	imgItems[imgCount + 1] = 0;
-
-	{
-		static LWPanControlDesc desc;
-		static LWValue ival = {LWT_INTEGER};
-
-		pan = PAN_CREATE(panl, "Normal Map v" PLUGIN_VERSION
-		                       " (c) D. Panokostas");
-		if (!pan) return AFUNC_OK;
-
-		ctlImage    = POPUP_CTL(panl, pan, "Image", imgItems);
-		ctlProj     = POPUP_CTL(panl, pan, "Projection", projNames);
-		ctlTileX    = INT_CTL(panl, pan, "Tile X %");
-		ctlTileY    = INT_CTL(panl, pan, "Tile Y %");
-		ctlStrength = SLIDER_CTL(panl, pan, "Strength", 150, 0, 100);
-		ctlFlipY    = BOOL_CTL(panl, pan, "Flip Y (DirectX)");
-
-		SET_INT(ctlImage, curImgIdx);
-		SET_INT(ctlProj, inst->projection);
-		SET_INT(ctlTileX, inst->tileX);
-		SET_INT(ctlTileY, inst->tileY);
-		SET_INT(ctlStrength, inst->strength);
-		SET_INT(ctlFlipY, inst->flipY);
-
-		if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
-			int idx;
-			GET_INT(ctlImage, idx);
-			if (idx > 0 && idx <= imgCount) {
-				inst->imageID = imgIDs[idx - 1];
-				/* Save the name from our popup array (known valid) */
-				if (imgItems[idx]) {
-					strncpy(inst->imageName, imgItems[idx],
-					        NMAP_MAX_NAME - 1);
-					inst->imageName[NMAP_MAX_NAME - 1] = '\0';
-				}
-			} else {
-				inst->imageID = 0;
-				inst->imageName[0] = '\0';
-			}
-
-			GET_INT(ctlProj, inst->projection);
-			GET_INT(ctlTileX, inst->tileX);
-			GET_INT(ctlTileY, inst->tileY);
-			GET_INT(ctlStrength, inst->strength);
-			GET_INT(ctlFlipY, inst->flipY);
-
-			/* Clamp */
-			if (inst->projection < 0) inst->projection = 0;
-			if (inst->projection >= NMAP_NUM_PROJ)
-				inst->projection = NMAP_NUM_PROJ - 1;
-			if (inst->tileX < 1) inst->tileX = 1;
-			if (inst->tileX > 10000) inst->tileX = 10000;
-			if (inst->tileY < 1) inst->tileY = 1;
-			if (inst->tileY > 10000) inst->tileY = 10000;
-			if (inst->strength < 0) inst->strength = 0;
-			if (inst->strength > 100) inst->strength = 100;
-		}
-
-		PAN_KILL(panl, pan);
+	/* Append active images dropped by the popup cap so every selection
+	 * stays visible and can be cleared explicitly. */
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		if (!inst->map[i].imageID) continue;
+		for (j = 0; j < count; j++)
+			if (ids[j] == inst->map[i].imageID) break;
+		if (j < count) continue;
+		ids[count] = inst->map[i].imageID;
+		items[count + 1] = il ? (*il->name)(inst->map[i].imageID) : inst->map[i].imageName;
+		if (!items[count + 1]) items[count + 1] = inst->map[i].imageName;
+		count++;
 	}
-
+	items[count + 1] = 0;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+		current[i] = 0;
+		for (value = 0; value < count; value++)
+			if (ids[value] == inst->map[i].imageID) current[i] = value + 1;
+	}
+	pan = PAN_CREATE(panl, "Normal Map v" PLUGIN_VERSION);
+	if (!pan) return AFUNC_OK;
+	for (i = 0; i < NMAP_SLOT_COUNT; i++)
+		image[i] = POPUP_CTL(panl, pan, (char *)slotLabels[i], items);
+	projection = POPUP_CTL(panl, pan, "Projection", projNames);
+	tileX = INT_CTL(panl, pan, "Tile X %");
+	tileY = INT_CTL(panl, pan, "Tile Y %");
+	strength = SLIDER_CTL(panl, pan, "Normal strength", 150, 0, 100);
+	flipY = BOOL_CTL(panl, pan, "Flip normal Y (DirectX)");
+	sharpness = SLIDER_CTL(panl, pan, "Box blend sharpness", 150, 1, 8);
+	albedoMode = POPUP_CTL(panl, pan, "Albedo mode", albedoModeNames);
+	for (i = NMAP_SLOT_ALBEDO; i < NMAP_SLOT_COUNT; i++)
+		amount[i] = SLIDER_CTL(panl, pan, (char *)amountLabels[i - NMAP_SLOT_ALBEDO], 150, 0, 100);
+	for (i = 0; i < NMAP_SLOT_COUNT; i++) SET_INT(image[i], current[i]);
+	SET_INT(projection, inst->projection);
+	SET_INT(tileX, inst->tileX);
+	SET_INT(tileY, inst->tileY);
+	SET_INT(strength, inst->strength);
+	SET_INT(flipY, inst->flipY);
+	SET_INT(sharpness, inst->boxSharpness);
+	SET_INT(albedoMode, inst->albedoMode);
+	SET_INT(amount[NMAP_SLOT_ALBEDO], inst->albedoAmount);
+	SET_INT(amount[NMAP_SLOT_ROUGHNESS], inst->roughnessAmount);
+	SET_INT(amount[NMAP_SLOT_METALLIC], inst->metallicAmount);
+	SET_INT(amount[NMAP_SLOT_AO], inst->aoAmount);
+	SET_INT(amount[NMAP_SLOT_SPECULAR], inst->specularAmount);
+	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
+		for (i = 0; i < NMAP_SLOT_COUNT; i++) {
+			GET_INT(image[i], value);
+			select_popup_slot(inst, i, value, count, ids, items);
+		}
+		GET_INT(projection, inst->projection);
+		GET_INT(tileX, inst->tileX);
+		GET_INT(tileY, inst->tileY);
+		GET_INT(strength, inst->strength);
+		GET_INT(flipY, inst->flipY);
+		GET_INT(sharpness, inst->boxSharpness);
+		GET_INT(albedoMode, inst->albedoMode);
+		GET_INT(amount[NMAP_SLOT_ALBEDO], inst->albedoAmount);
+		GET_INT(amount[NMAP_SLOT_ROUGHNESS], inst->roughnessAmount);
+		GET_INT(amount[NMAP_SLOT_METALLIC], inst->metallicAmount);
+		GET_INT(amount[NMAP_SLOT_AO], inst->aoAmount);
+		GET_INT(amount[NMAP_SLOT_SPECULAR], inst->specularAmount);
+		if (inst->projection < 0) inst->projection = 0;
+		if (inst->projection >= NMAP_NUM_PROJ) inst->projection = NMAP_NUM_PROJ - 1;
+		if (inst->tileX < 1) inst->tileX = 1;
+		if (inst->tileX > 10000) inst->tileX = 10000;
+		if (inst->tileY < 1) inst->tileY = 1;
+		if (inst->tileY > 10000) inst->tileY = 10000;
+		if (inst->strength < 0) inst->strength = 0;
+		if (inst->strength > 100) inst->strength = 100;
+		if (inst->boxSharpness < 1) inst->boxSharpness = 1;
+		if (inst->boxSharpness > 8) inst->boxSharpness = 8;
+		if (inst->albedoMode < 0 || inst->albedoMode > 1) inst->albedoMode = NMAP_ALBEDO_REPLACE;
+		for (i = NMAP_SLOT_ALBEDO; i < NMAP_SLOT_COUNT; i++) {
+			a = i == NMAP_SLOT_ALBEDO ? &inst->albedoAmount :
+				i == NMAP_SLOT_ROUGHNESS ? &inst->roughnessAmount :
+				i == NMAP_SLOT_METALLIC ? &inst->metallicAmount :
+				i == NMAP_SLOT_AO ? &inst->aoAmount : &inst->specularAmount;
+			if (*a < 0) *a = 0;
+			if (*a > 100) *a = 100;
+		}
+	}
+	PAN_KILL(panl, pan);
 	return AFUNC_OK;
 }
 
-/* ----------------------------------------------------------------
- * Activation
- * ---------------------------------------------------------------- */
-
-XCALL_(int)
-Activate(
-	long         version,
-	GlobalFunc  *global,
-	void        *local,
-	void        *serverData)
+XCALL_(int) Activate(long version, GlobalFunc *global, void *local, void *serverData)
 {
 	ShaderHandler *h = (ShaderHandler *)local;
 	XCALL_INIT;
-
-	if (version < 1)
-		return AFUNC_BADVERSION;
-
-	h->create   = (void *)Create;
-	h->destroy  = (void *)Destroy;
-	h->load     = (void *)Load;
-	h->save     = (void *)Save;
-	h->copy     = (void *)Copy;
-	h->init     = (void *)Init;
-	h->cleanup  = (void *)Cleanup;
-	h->newTime  = (void *)NewTime;
-	h->evaluate = (void *)Evaluate;
-	h->flags    = (void *)Flags;
-	h->descln   = (void *)DescLn;
-
-	gfunc = global;
-	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
-	if (!msg)
-		return AFUNC_BADGLOBAL;
-
-	return AFUNC_OK;
+	if (version < 1) return AFUNC_BADVERSION;
+	h->create = (void *)Create; h->destroy = (void *)Destroy; h->load = (void *)Load; h->save = (void *)Save; h->copy = (void *)Copy; h->init = (void *)Init; h->cleanup = (void *)Cleanup; h->newTime = (void *)NewTime; h->evaluate = (void *)Evaluate; h->flags = (void *)Flags; h->descln = (void *)DescLn;
+	gfunc = global; msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
+	return msg ? AFUNC_OK : AFUNC_BADGLOBAL;
 }
 
-/* ----------------------------------------------------------------
- * Server description
- * ---------------------------------------------------------------- */
-
 ServerRecord ServerDesc[] = {
-	{ "ShaderHandler",   "NormalMap",
-	  (ActivateFunc *)Activate },
-	{ "ShaderInterface", "NormalMap",
-	  (ActivateFunc *)Interface },
+	{ "ShaderHandler", "NormalMap", (ActivateFunc *)Activate },
+	{ "ShaderInterface", "NormalMap", (ActivateFunc *)Interface },
 	{ 0 }
 };
