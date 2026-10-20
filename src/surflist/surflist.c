@@ -207,7 +207,7 @@ parse_surface_chunk(const unsigned char *data, unsigned long length,
 		unsigned int size = be16(data + pos + 4);
 		unsigned long next = pos + 6 + (unsigned long)size;
 
-		if (next > length) break;
+		if (next > length) return 0;
 		if (same_id(data + pos, "COLR") && size >= 3) {
 			params->color[0] = value[0] / 255.0;
 			params->color[1] = value[1] / 255.0;
@@ -246,6 +246,8 @@ parse_surface_chunk(const unsigned char *data, unsigned long length,
 		}
 		pos = next + (next & 1);
 	}
+	/* only a pad byte may remain after the last sub-chunk */
+	if (length > pos + 1) return 0;
 	if (!explicitLuminous && (flags & 1)) params->luminous = 1.0;
 	return 1;
 }
@@ -254,7 +256,7 @@ static int
 load_surface(const char *path, SurfaceParams *params)
 {
 	unsigned char *data;
-	unsigned long size, pos;
+	unsigned long size, pos, end;
 	int found = 0;
 
 	if (!read_file(path, MAX_SURF_BYTES, &data, &size)) return 0;
@@ -262,13 +264,18 @@ load_surface(const char *path, SurfaceParams *params)
 		plugin_free(data);
 		return 0;
 	}
+	end = 8 + be32(data + 4);
+	if (end > size) {
+		plugin_free(data);
+		return 0;
+	}
 
 	set_surface_defaults(params);
 	pos = 12;
-	while (pos + 8 <= size) {
+	while (pos + 8 <= end) {
 		unsigned long chunkSize = be32(data + pos + 4);
 		unsigned long next;
-		if (chunkSize > size - pos - 8)
+		if (chunkSize > end - pos - 8)
 			break;
 		next = pos + 8 + chunkSize;
 		if (same_id(data + pos, "SURF")) {
