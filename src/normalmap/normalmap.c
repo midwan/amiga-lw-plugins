@@ -362,6 +362,28 @@ XCALL_(static LWError) Load(NormalMapInst *inst, const LWLoadState *ls)
 				if (!read_object_string(ls, inst->map[i].imageName, NMAP_MAX_NAME)) return 0;
 		} else return 0;
 	}
+	/* Damaged or hand-edited data must not reach the render loop with
+	 * out-of-range values (boxSharpness drives a per-pixel multiply loop). */
+	if (inst->projection < 0 || inst->projection >= NMAP_NUM_PROJ) inst->projection = NMAP_PROJ_XY;
+	if (inst->tileX < 1) inst->tileX = 1;
+	if (inst->tileX > 10000) inst->tileX = 10000;
+	if (inst->tileY < 1) inst->tileY = 1;
+	if (inst->tileY > 10000) inst->tileY = 10000;
+	if (inst->strength < 0) inst->strength = 0;
+	if (inst->strength > 100) inst->strength = 100;
+	if (inst->boxSharpness < 1) inst->boxSharpness = 1;
+	if (inst->boxSharpness > 8) inst->boxSharpness = 8;
+	if (inst->albedoMode < 0 || inst->albedoMode > 1) inst->albedoMode = NMAP_ALBEDO_REPLACE;
+	if (inst->albedoAmount < 0) inst->albedoAmount = 0;
+	if (inst->albedoAmount > 100) inst->albedoAmount = 100;
+	if (inst->roughnessAmount < 0) inst->roughnessAmount = 0;
+	if (inst->roughnessAmount > 100) inst->roughnessAmount = 100;
+	if (inst->metallicAmount < 0) inst->metallicAmount = 0;
+	if (inst->metallicAmount > 100) inst->metallicAmount = 100;
+	if (inst->aoAmount < 0) inst->aoAmount = 0;
+	if (inst->aoAmount > 100) inst->aoAmount = 100;
+	if (inst->specularAmount < 0) inst->specularAmount = 0;
+	if (inst->specularAmount > 100) inst->specularAmount = 100;
 	for (i = 0; i < NMAP_SLOT_COUNT; i++) inst->map[i].imageID = find_image_by_name(inst->map[i].imageName);
 	return 0;
 }
@@ -496,12 +518,22 @@ static double tri_weight(double normal, int sharpness)
 	return weight;
 }
 
-static void sample_axis(const NormalMapInst *inst, const MapSlot *slot, int axis,
-	const double pos[3], double rgb[3])
+static void sample_axis_mirrored(const NormalMapInst *inst, const MapSlot *slot, int axis,
+	const double pos[3], int mirrorV, double rgb[3])
 {
 	double u, v;
 	map_uv(inst, axis, pos, &u, &v);
+	if (mirrorV) {
+		v = 1.0 - v;
+		if (v >= 1.0) v = 0.0;
+	}
 	sample_2d(slot, u, v, rgb);
+}
+
+static void sample_axis(const NormalMapInst *inst, const MapSlot *slot, int axis,
+	const double pos[3], double rgb[3])
+{
+	sample_axis_mirrored(inst, slot, axis, pos, 0, rgb);
 }
 
 static void sample_map(NormalMapInst *inst, const MapSlot *slot,
@@ -550,21 +582,11 @@ static void axis_normal(int axis, const double rgb[3], int flipY, double sign, d
 	double x = rgb[0] * 2.0 - 1.0;
 	double y = rgb[1] * 2.0 - 1.0;
 	double z = rgb[2];
-	int negSign = sign < 0.0;
 	if (flipY) y = -y;
 	if (z < 0.01) z = 0.01;
-	/* Keep each projected frame right-handed: U x V must follow the
-	 * outward face normal, so flip the V tilt when it does not. */
-	if (axis == NMAP_PROJ_XZ) {
-		if (!negSign) y = -y;
-		out[0] = x; out[1] = sign * z; out[2] = y;
-	} else if (axis == NMAP_PROJ_YZ) {
-		if (negSign) y = -y;
-		out[0] = sign * z; out[1] = x; out[2] = y;
-	} else {
-		if (negSign) y = -y;
-		out[0] = x; out[1] = y; out[2] = sign * z;
-	}
+	if (axis == NMAP_PROJ_XZ) { out[0] = x; out[1] = sign * z; out[2] = y; }
+	else if (axis == NMAP_PROJ_YZ) { out[0] = sign * z; out[1] = x; out[2] = y; }
+	else { out[0] = x; out[1] = y; out[2] = sign * z; }
 	vec_normalize(out);
 }
 
@@ -575,9 +597,11 @@ static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 
 	if (!inst->map[NMAP_SLOT_NORMAL].data || !inst->strength) return;
 	if (inst->projection == NMAP_PROJ_BOX) {
-		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XY, sa->oPos, inst->scratch.sample[0]);
-		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XZ, sa->oPos, inst->scratch.sample[1]);
-		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_YZ, sa->oPos, inst->scratch.sample[2]);
+		/* Mirror the sampled V on faces whose U x V opposes the outward
+		 * normal, so sampled features and decoded slopes stay aligned. */
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XY, sa->oPos, normal[2] < 0.0, inst->scratch.sample[0]);
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XZ, sa->oPos, normal[1] >= 0.0, inst->scratch.sample[1]);
+		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_YZ, sa->oPos, normal[0] < 0.0, inst->scratch.sample[2]);
 		axis_normal(NMAP_PROJ_XY, inst->scratch.sample[0], inst->flipY, normal[2] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[0]);
 		axis_normal(NMAP_PROJ_XZ, inst->scratch.sample[1], inst->flipY, normal[1] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[1]);
 		axis_normal(NMAP_PROJ_YZ, inst->scratch.sample[2], inst->flipY, normal[0] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[2]);
@@ -676,8 +700,18 @@ XCALL_(static void) Evaluate(NormalMapInst *inst, ShaderAccess *sa)
 	if (inst->map[NMAP_SLOT_METALLIC].data && inst->metallicAmount) {
 		amount = inst->metallicAmount / 100.0;
 		sample_map(inst, &inst->map[NMAP_SLOT_METALLIC], sa->oPos, inst->scratch.objectGeomNormal, rgb);
-		value = luma(rgb) * amount;
-		oneMinusCos = 1.0 - absd(sa->cosine);
+	value = luma(rgb) * amount;
+	/* Fresnel follows the perturbed normal: rebuild the view dot from
+	 * the ray source instead of the read-only cosine field. */
+	{
+		double view[3], vlen;
+		view[0] = sa->raySource[0] - sa->wPos[0];
+		view[1] = sa->raySource[1] - sa->wPos[1];
+		view[2] = sa->raySource[2] - sa->wPos[2];
+		vlen = sqrt(view[0] * view[0] + view[1] * view[1] + view[2] * view[2]);
+		if (vlen > 0.000001) { view[0] /= vlen; view[1] /= vlen; view[2] /= vlen; }
+		oneMinusCos = 1.0 - absd(view[0] * sa->wNorm[0] + view[1] * sa->wNorm[1] + view[2] * sa->wNorm[2]);
+	}
 		if (oneMinusCos < 0.0) oneMinusCos = 0.0;
 		if (oneMinusCos > 1.0) oneMinusCos = 1.0;
 		fresnel = oneMinusCos * oneMinusCos;
