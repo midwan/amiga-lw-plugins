@@ -256,7 +256,7 @@ load_surface(const char *path, SurfaceParams *params)
 	int found = 0;
 
 	if (!read_file(path, MAX_SURF_BYTES, &data, &size)) return 0;
-	if (size < 12 || !same_id(data, "FORM")) {
+	if (size < 12 || !same_id(data, "FORM") || !same_id(data + 8, "LWOB")) {
 		plugin_free(data);
 		return 0;
 	}
