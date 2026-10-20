@@ -579,12 +579,15 @@ static void world_to_object(const ShaderAccess *sa, const double in[3], double o
 	out[2] = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
 }
 
-static void axis_normal(int axis, const double rgb[3], int flipY, double sign, double out[3])
+static void axis_normal(int axis, const double rgb[3], int flipY, double sign, int mirrorV, double out[3])
 {
 	double x = rgb[0] * 2.0 - 1.0;
 	double y = rgb[1] * 2.0 - 1.0;
 	double z = rgb[2];
 	if (flipY) y = -y;
+	/* Mirrored sampling reverses the object-space V direction the
+	 * green tilt acts along. */
+	if (mirrorV) y = -y;
 	if (z < 0.01) z = 0.01;
 	if (axis == NMAP_PROJ_XZ) { out[0] = x; out[1] = sign * z; out[2] = y; }
 	else if (axis == NMAP_PROJ_YZ) { out[0] = sign * z; out[1] = x; out[2] = y; }
@@ -604,9 +607,9 @@ static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XY, sa->oPos, normal[2] < 0.0, inst->scratch.sample[0]);
 		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_XZ, sa->oPos, normal[1] >= 0.0, inst->scratch.sample[1]);
 		sample_axis_mirrored(inst, &inst->map[NMAP_SLOT_NORMAL], NMAP_PROJ_YZ, sa->oPos, normal[0] < 0.0, inst->scratch.sample[2]);
-		axis_normal(NMAP_PROJ_XY, inst->scratch.sample[0], inst->flipY, normal[2] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[0]);
-		axis_normal(NMAP_PROJ_XZ, inst->scratch.sample[1], inst->flipY, normal[1] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[1]);
-		axis_normal(NMAP_PROJ_YZ, inst->scratch.sample[2], inst->flipY, normal[0] < 0.0 ? -1.0 : 1.0, inst->scratch.sample[2]);
+		axis_normal(NMAP_PROJ_XY, inst->scratch.sample[0], inst->flipY, normal[2] < 0.0 ? -1.0 : 1.0, normal[2] < 0.0, inst->scratch.sample[0]);
+		axis_normal(NMAP_PROJ_XZ, inst->scratch.sample[1], inst->flipY, normal[1] < 0.0 ? -1.0 : 1.0, normal[1] >= 0.0, inst->scratch.sample[1]);
+		axis_normal(NMAP_PROJ_YZ, inst->scratch.sample[2], inst->flipY, normal[0] < 0.0 ? -1.0 : 1.0, normal[0] < 0.0, inst->scratch.sample[2]);
 		/* Reorient each plane's perturbation around the pre-perturbation
 		 * surface normal. A neutral normal map must leave it unchanged. */
 		inst->scratch.sample[0][0] += normal[0];
@@ -627,31 +630,47 @@ static void apply_normal(NormalMapInst *inst, ShaderAccess *sa)
 		inst->scratch.objectNormal[1] = (wz * inst->scratch.sample[0][1] + wy * inst->scratch.sample[1][1] + wx * inst->scratch.sample[2][1]) / total;
 		inst->scratch.objectNormal[2] = (wz * inst->scratch.sample[0][2] + wy * inst->scratch.sample[1][2] + wx * inst->scratch.sample[2][2]) / total;
 	} else {
+		double *tangent = inst->scratch.sample[1];
+		double *bitangent = inst->scratch.sample[2];
+		double dot;
 		sample_axis(inst, &inst->map[NMAP_SLOT_NORMAL], inst->projection, sa->oPos, inst->scratch.sample[0]);
 		inst->scratch.objectNormal[0] = inst->scratch.sample[0][0] * 2.0 - 1.0;
 		inst->scratch.objectNormal[1] = inst->scratch.sample[0][1] * 2.0 - 1.0;
 		inst->scratch.objectNormal[2] = inst->scratch.sample[0][2];
 		if (inst->flipY) inst->scratch.objectNormal[1] = -inst->scratch.objectNormal[1];
 		if (inst->scratch.objectNormal[2] < 0.01) inst->scratch.objectNormal[2] = 0.01;
-		/* Planar projection retains the original normal-relative tangent
-		 * frame so it can perturb curved or off-axis surface geometry. */
-		if (sa->wNorm[0] > 0.9 || sa->wNorm[0] < -0.9) {
-			inst->scratch.sample[1][0] = -sa->wNorm[2];
-			inst->scratch.sample[1][1] = 0.0;
-			inst->scratch.sample[1][2] = sa->wNorm[0];
+		/* Planar tangents come from the projection's own object-space U
+		 * and V axes, moved to world space and flattened onto the
+		 * surface so detail follows the sampled map directions. */
+		if (inst->projection == NMAP_PROJ_XZ) {
+			tangent[0] = 1.0; tangent[1] = 0.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 0.0; bitangent[2] = 1.0;
+		} else if (inst->projection == NMAP_PROJ_YZ) {
+			tangent[0] = 0.0; tangent[1] = 1.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 0.0; bitangent[2] = 1.0;
 		} else {
-			inst->scratch.sample[1][0] = 0.0;
-			inst->scratch.sample[1][1] = sa->wNorm[2];
-			inst->scratch.sample[1][2] = -sa->wNorm[1];
+			tangent[0] = 1.0; tangent[1] = 0.0; tangent[2] = 0.0;
+			bitangent[0] = 0.0; bitangent[1] = 1.0; bitangent[2] = 0.0;
 		}
-		vec_normalize(inst->scratch.sample[1]);
-		inst->scratch.sample[2][0] = sa->wNorm[1] * inst->scratch.sample[1][2] - sa->wNorm[2] * inst->scratch.sample[1][1];
-		inst->scratch.sample[2][1] = sa->wNorm[2] * inst->scratch.sample[1][0] - sa->wNorm[0] * inst->scratch.sample[1][2];
-		inst->scratch.sample[2][2] = sa->wNorm[0] * inst->scratch.sample[1][1] - sa->wNorm[1] * inst->scratch.sample[1][0];
-		vec_normalize(inst->scratch.sample[2]);
-		inst->scratch.worldNormal[0] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][0] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][0] + inst->scratch.objectNormal[2] * sa->wNorm[0];
-		inst->scratch.worldNormal[1] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][1] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][1] + inst->scratch.objectNormal[2] * sa->wNorm[1];
-		inst->scratch.worldNormal[2] = inst->scratch.objectNormal[0] * inst->scratch.sample[1][2] + inst->scratch.objectNormal[1] * inst->scratch.sample[2][2] + inst->scratch.objectNormal[2] * sa->wNorm[2];
+		object_to_world(sa, tangent, tangent);
+		object_to_world(sa, bitangent, bitangent);
+		dot = tangent[0] * sa->wNorm[0] + tangent[1] * sa->wNorm[1] + tangent[2] * sa->wNorm[2];
+		tangent[0] -= dot * sa->wNorm[0];
+		tangent[1] -= dot * sa->wNorm[1];
+		tangent[2] -= dot * sa->wNorm[2];
+		vec_normalize(tangent);
+		dot = bitangent[0] * sa->wNorm[0] + bitangent[1] * sa->wNorm[1] + bitangent[2] * sa->wNorm[2];
+		bitangent[0] -= dot * sa->wNorm[0];
+		bitangent[1] -= dot * sa->wNorm[1];
+		bitangent[2] -= dot * sa->wNorm[2];
+		dot = bitangent[0] * tangent[0] + bitangent[1] * tangent[1] + bitangent[2] * tangent[2];
+		bitangent[0] -= dot * tangent[0];
+		bitangent[1] -= dot * tangent[1];
+		bitangent[2] -= dot * tangent[2];
+		vec_normalize(bitangent);
+		inst->scratch.worldNormal[0] = inst->scratch.objectNormal[0] * tangent[0] + inst->scratch.objectNormal[1] * bitangent[0] + inst->scratch.objectNormal[2] * sa->wNorm[0];
+		inst->scratch.worldNormal[1] = inst->scratch.objectNormal[0] * tangent[1] + inst->scratch.objectNormal[1] * bitangent[1] + inst->scratch.objectNormal[2] * sa->wNorm[1];
+		inst->scratch.worldNormal[2] = inst->scratch.objectNormal[0] * tangent[2] + inst->scratch.objectNormal[1] * bitangent[2] + inst->scratch.objectNormal[2] * sa->wNorm[2];
 	}
 	if (inst->projection == NMAP_PROJ_BOX) {
 		object_to_world(sa, inst->scratch.objectNormal, inst->scratch.worldNormal);
