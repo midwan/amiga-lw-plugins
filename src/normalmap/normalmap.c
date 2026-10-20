@@ -162,6 +162,31 @@ static void init_defaults(NormalMapInst *inst)
 	inst->specularAmount = 100;
 }
 
+static const char *base_name(const char *path)
+{
+	const char *b = path, *p;
+	if (!path) return 0;
+	for (p = path; *p; p++)
+		if (*p == ':' || *p == '/' || *p == '\\') b = p + 1;
+	return b;
+}
+
+static int same_image_name(const char *stored, const char *listed)
+{
+	const char *a, *b;
+	if (!stored || !listed) return 0;
+	if (strcmp(stored, listed) == 0) return 1;
+	/* Layout may list an image without its volume or path prefix. */
+	a = base_name(stored); b = base_name(listed);
+	while (*a && *b) {
+		char ca = *a++, cb = *b++;
+		if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+		if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+		if (ca != cb) return 0;
+	}
+	return *a == '\0' && *b == '\0';
+}
+
 static LWImageID find_image_by_name(const char *name)
 {
 	LWImageList *il;
@@ -171,7 +196,7 @@ static LWImageID find_image_by_name(const char *name)
 	if (!il) return 0;
 	for (id = (*il->first)(); id; id = (*il->next)(id)) {
 		const char *n = (*il->name)(id);
-		if (n && strcmp(n, name) == 0) return id;
+		if (same_image_name(name, n)) return id;
 	}
 	return 0;
 }
@@ -503,16 +528,16 @@ static double luma(const double rgb[3])
 
 static void object_to_world(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->oXfrm[0] * in[0] + sa->oXfrm[1] * in[1] + sa->oXfrm[2] * in[2];
-	out[1] = sa->oXfrm[3] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[5] * in[2];
-	out[2] = sa->oXfrm[6] * in[0] + sa->oXfrm[7] * in[1] + sa->oXfrm[8] * in[2];
+	out[0] = sa->oXfrm[0] * in[0] + sa->oXfrm[3] * in[1] + sa->oXfrm[6] * in[2];
+	out[1] = sa->oXfrm[1] * in[0] + sa->oXfrm[4] * in[1] + sa->oXfrm[7] * in[2];
+	out[2] = sa->oXfrm[2] * in[0] + sa->oXfrm[5] * in[1] + sa->oXfrm[8] * in[2];
 }
 
 static void world_to_object(const ShaderAccess *sa, const double in[3], double out[3])
 {
-	out[0] = sa->wXfrm[0] * in[0] + sa->wXfrm[1] * in[1] + sa->wXfrm[2] * in[2];
-	out[1] = sa->wXfrm[3] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[5] * in[2];
-	out[2] = sa->wXfrm[6] * in[0] + sa->wXfrm[7] * in[1] + sa->wXfrm[8] * in[2];
+	out[0] = sa->wXfrm[0] * in[0] + sa->wXfrm[3] * in[1] + sa->wXfrm[6] * in[2];
+	out[1] = sa->wXfrm[1] * in[0] + sa->wXfrm[4] * in[1] + sa->wXfrm[7] * in[2];
+	out[2] = sa->wXfrm[2] * in[0] + sa->wXfrm[5] * in[1] + sa->wXfrm[8] * in[2];
 }
 
 static void axis_normal(int axis, const double rgb[3], int flipY, double sign, double out[3])
