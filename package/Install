@@ -80,6 +80,8 @@
 
 ; Installer 43.x returns only the choices that fit its fixed window (nine
 ; lines), so related plugins share one entry to keep the list at eight.
+; Keep each label to one line (about 44 characters): a wrapped label
+; pushes the last choice onto a second page.
 (set #plugins
 	(if (= @user-level 0)
 		255
@@ -87,7 +89,7 @@
 			(prompt "Select the plugins to install.")
 			(help "All plugins are selected by default. Each one is described in the documentation drawer.")
 			(choices
-				"ObjSwap + ObjList + ObjMeshSwap (object replacement)"
+				"ObjSwap + ObjList + ObjMeshSwap (replacers)"
 				"Fresnel + SurfList + InstanceColor (shaders)"
 				"PBR (shader)"
 				"NormalMap (shader)"
