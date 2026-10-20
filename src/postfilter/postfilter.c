@@ -44,6 +44,10 @@ typedef struct {
 	int passes;
 } PostFilterInst;
 
+/* Shared scene-serialization buffer: LightWave calls load/save with a
+ * small stack, so the line buffer lives in static data, not on it. */
+static char iobuf[256];
+
 static MessageFuncs *msg;
 static char descBuf[64];
 
@@ -188,7 +192,7 @@ Copy(PostFilterInst *from, PostFilterInst *to)
 XCALL_(static LWError)
 Load(PostFilterInst *inst, const LWLoadState *ls)
 {
-	char buf[256];
+	char *buf = iobuf;
 	const char *p;
 	int version;
 	int *values = &inst->region;
@@ -211,7 +215,7 @@ Load(PostFilterInst *inst, const LWLoadState *ls)
 XCALL_(static LWError)
 Save(PostFilterInst *inst, const LWSaveState *ss)
 {
-	char buf[256];
+	char *buf = iobuf;
 	int pos = 0;
 	int *values = &inst->region;
 	int i;
