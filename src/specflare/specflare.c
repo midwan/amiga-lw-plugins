@@ -1,19 +1,17 @@
 /*
- * LENSFLARE.C -- Specular Lens Flare Image Filter for LightWave 3D
+ * SPECFLARE.C -- Specular Lens Flare Image Filter for LightWave 3D
  *
  * Post-render filter that detects bright specular highlights and
  * composites glow and star streaks over the rendered image.
  * Uses ImageFilterHandler for full frame buffer access.
  *
- * Uses AllocMem/FreeMem and custom helpers — no libnix runtime.
+ * Uses AllocMem/FreeMem and custom helpers -- no libnix runtime.
  */
 
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
-
-#include <string.h>
 
 #include <proto/exec.h>
 #include <exec/memory.h>
@@ -51,14 +49,21 @@ static void
 int_to_str(int val, char *buf, int buflen)
 {
 	char tmp[12];
-	int  i = 0, neg = 0, len;
+	unsigned long magnitude;
+	int i = 0, neg = 0, len;
 
-	if (val < 0) { neg = 1; val = -val; }
-	if (val == 0) { tmp[i++] = '0'; }
-	else {
-		while (val > 0 && i < 11) {
-			tmp[i++] = (char)('0' + (val % 10));
-			val /= 10;
+	if (val < 0) {
+		neg = 1;
+		magnitude = (unsigned long)(-(val + 1)) + 1;
+	} else {
+		magnitude = (unsigned long)val;
+	}
+	if (magnitude == 0) {
+		tmp[i++] = '0';
+	} else {
+		while (magnitude > 0 && i < 11) {
+			tmp[i++] = (char)('0' + (magnitude % 10));
+			magnitude /= 10;
 		}
 	}
 	len = neg + i;
@@ -75,15 +80,30 @@ int_to_str(int val, char *buf, int buflen)
 static const char *
 lf_parse_int(const char *s, int *val)
 {
+	unsigned long magnitude = 0;
+	unsigned long limit;
 	int neg = 0;
-	*val = 0;
+
 	while (*s == ' ') s++;
-	if (*s == '-') { neg = 1; s++; }
-	while (*s >= '0' && *s <= '9') {
-		*val = *val * 10 + (*s - '0');
+	if (*s == '-') {
+		neg = 1;
 		s++;
 	}
-	if (neg) *val = -*val;
+	limit = neg ? 2147483648UL : 2147483647UL;
+	while (*s >= '0' && *s <= '9') {
+		unsigned long digit = (unsigned long)(*s - '0');
+		if (magnitude > (limit - digit) / 10)
+			magnitude = limit;
+		else
+			magnitude = magnitude * 10 + digit;
+		s++;
+	}
+	if (neg) {
+		*val = magnitude == 2147483648UL
+		     ? (-2147483647 - 1) : -(int)magnitude;
+	} else {
+		*val = (int)magnitude;
+	}
 	return s;
 }
 
@@ -100,30 +120,20 @@ lf_append_int(char *buf, int *pos, int val)
 }
 
 /* ----------------------------------------------------------------
- * Pre-computed 6-point star streak directions (hexagonal)
+ * Star filter directions
  * ---------------------------------------------------------------- */
 
-static const double streak_dx[6] = {
-	1.000, 0.500, -0.500, -1.000, -0.500, 0.500
-};
-static const double streak_dy[6] = {
-	0.000, 0.866, 0.866, 0.000, -0.866, -0.866
-};
-
-static const double rot_cos[8] = {
-	1.000, 0.991, 0.966, 0.924, 0.866, 0.793, 0.707, 0.609
-};
-static const double rot_sin[8] = {
-	0.000, 0.131, 0.259, 0.383, 0.500, 0.609, 0.707, 0.793
-};
+#define PI 3.14159265358979323846
 
 /* ----------------------------------------------------------------
  * Types
  * ---------------------------------------------------------------- */
 
-#define MAX_DETECT 64
-#define MAX_FLARES 50
-#define LENSFLARE_OBJECT_VERSION 1
+#define MAX_DETECT 250
+#define MAX_FLARES 250
+#define MAX_STAR_DIRECTIONS 20
+#define STAR_DIRECTION_SCALE 1024
+#define SPECFLARE_OBJECT_VERSION 2
 
 typedef struct {
 	int x, y;
@@ -131,19 +141,29 @@ typedef struct {
 	int accumBright;
 	int pixelCount;
 	double depth;
+	int glowRadius;
+	int streakLength;
 } FlareSource;
+
+typedef struct {
+	int dx, dy;
+	int lengthScale;
+	int intensityScale;
+} StarDirection;
 
 typedef struct {
 	int    threshold;
 	int    glowRadius;
 	int    streakLength;
 	int    intensity;
-	int    streakCount;
-	int    randomRotation;
+	int    starFilter;
+	int    rotationAngle;
+	int    spin;
 	int    showRing;
 	int    anamorphic;
 	int    maxFlares;
-} LensFlareInst;
+	char   ioBuffer[144];
+} SpecFlareInst;
 
 /* ----------------------------------------------------------------
  * Globals
@@ -158,18 +178,19 @@ static MessageFuncs *msg;
 XCALL_(static LWInstance)
 Create(LWError *err)
 {
-	LensFlareInst *inst;
+	SpecFlareInst *inst;
 	XCALL_INIT;
 
-	inst = (LensFlareInst *)plugin_alloc(sizeof(LensFlareInst));
+	inst = (SpecFlareInst *)plugin_alloc(sizeof(SpecFlareInst));
 	if (!inst) return 0;
 
-	inst->threshold   = 220;
-	inst->glowRadius  = 100;
+	inst->threshold = 220;
+	inst->glowRadius = 100;
 	inst->streakLength = 200;
-	inst->intensity   = 80;
-	inst->streakCount = 6;
-	inst->randomRotation = 1;
+	inst->intensity = 80;
+	inst->starFilter = 5;
+	inst->rotationAngle = 0;
+	inst->spin = 0;
 	inst->showRing = 1;
 	inst->anamorphic = 1;
 	inst->maxFlares = 8;
@@ -178,91 +199,177 @@ Create(LWError *err)
 }
 
 XCALL_(static void)
-Destroy(LensFlareInst *inst)
+Destroy(SpecFlareInst *inst)
 {
 	XCALL_INIT;
 	if (inst) plugin_free(inst);
 }
 
 XCALL_(static LWError)
-Copy(LensFlareInst *from, LensFlareInst *to)
+Copy(SpecFlareInst *from, SpecFlareInst *to)
 {
 	XCALL_INIT;
 	*to = *from;
 	return 0;
 }
 
-XCALL_(static LWError)
-Load(LensFlareInst *inst, const LWLoadState *ls)
+static void
+ClampSettings(SpecFlareInst *inst)
 {
-	char buf[64];
+	if (inst->threshold < 0) inst->threshold = 0;
+	if (inst->threshold > 255) inst->threshold = 255;
+	if (inst->glowRadius < 1) inst->glowRadius = 1;
+	if (inst->glowRadius > 200) inst->glowRadius = 200;
+	if (inst->streakLength < 1) inst->streakLength = 1;
+	if (inst->streakLength > 400) inst->streakLength = 400;
+	if (inst->intensity < 0) inst->intensity = 0;
+	if (inst->intensity > 100) inst->intensity = 100;
+	if (inst->starFilter < 0) inst->starFilter = 0;
+	if (inst->starFilter > 10) inst->starFilter = 10;
+	if (inst->showRing) inst->showRing = 1;
+	if (inst->anamorphic) inst->anamorphic = 1;
+	if (inst->maxFlares < 1) inst->maxFlares = 1;
+	if (inst->maxFlares > MAX_FLARES) inst->maxFlares = MAX_FLARES;
+}
+
+static int
+SinHalfDegrees(long angle)
+{
+	long product, denom, sign = 1;
+
+	angle %= 720;
+	if (angle < 0) angle += 720;
+	if (angle > 360) {
+		angle -= 360;
+		sign = -1;
+	}
+	product = angle * (360 - angle);
+	denom = 162000L - product;
+	if (denom <= 0) denom = 1;
+	return (int)(sign * ((4096L * product) / denom));
+}
+static int
+BuildStarDirections(const SpecFlareInst *inst, LWFrame frame,
+	StarDirection *stars)
+{
+	int mainCount, hasSecondary, s, count = 0;
+	long angle, spacing, base, rotation, spin, frameAngle;
+
+	if (inst->starFilter == 0) return 0;
+	mainCount = ((inst->starFilter + 1) / 2) * 2;
+	hasSecondary = (inst->starFilter & 1) == 0;
+	rotation = (long)inst->rotationAngle % 360;
+	spin = (long)inst->spin % 360;
+	frameAngle = (long)frame % 360;
+	base = (rotation + spin * frameAngle) % 360 * 2;
+	spacing = 720 / mainCount;
+
+	for (s = 0; s < mainCount; s++) {
+		angle = base + spacing * (long)s;
+		stars[count].dx = SinHalfDegrees(angle + 180);
+		stars[count].dy = SinHalfDegrees(angle);
+		stars[count].lengthScale = STAR_DIRECTION_SCALE;
+		stars[count].intensityScale = STAR_DIRECTION_SCALE;
+		count++;
+	}
+	if (hasSecondary) {
+		for (s = 0; s < mainCount; s++) {
+			angle = base + spacing * (long)s + spacing / 2;
+			stars[count].dx = SinHalfDegrees(angle + 180);
+			stars[count].dy = SinHalfDegrees(angle);
+			stars[count].lengthScale = STAR_DIRECTION_SCALE / 2;
+			stars[count].intensityScale = STAR_DIRECTION_SCALE / 2;
+			count++;
+		}
+	}
+
+	return count;
+}
+
+XCALL_(static LWError)
+Load(SpecFlareInst *inst, const LWLoadState *ls)
+{
 	const char *p;
-	int v;
+	int v, threshold, glowRadius, streakLength, intensity, starFilter;
+	int rotationAngle, spin, showRing, anamorphic, maxFlares;
 	XCALL_INIT;
 
 	if (ls->ioMode == LWIO_SCENE) {
-		if (!spi_read_line(ls, buf, sizeof(buf)) || !buf[0])
+		if (!spi_read_line(ls, inst->ioBuffer, sizeof(inst->ioBuffer))
+			|| !inst->ioBuffer[0])
 			return 0;
 
-		p = buf;
-		p = lf_parse_int(p, &v); inst->threshold = v;
-		p = lf_parse_int(p, &v); inst->glowRadius = v;
-		p = lf_parse_int(p, &v); inst->streakLength = v;
-		p = lf_parse_int(p, &v); inst->intensity = v;
-		p = lf_parse_int(p, &v); inst->streakCount = v;
-		p = lf_parse_int(p, &v); inst->randomRotation = v;
-		p = lf_parse_int(p, &v); inst->showRing = v;
-		p = lf_parse_int(p, &v); inst->anamorphic = v;
-		p = lf_parse_int(p, &v); inst->maxFlares = v;
+		p = inst->ioBuffer;
+		p = lf_parse_int(p, &v);
+		if (v != SPECFLARE_OBJECT_VERSION) return 0;
+		p = lf_parse_int(p, &inst->threshold);
+		p = lf_parse_int(p, &inst->glowRadius);
+		p = lf_parse_int(p, &inst->streakLength);
+		p = lf_parse_int(p, &inst->intensity);
+		p = lf_parse_int(p, &inst->starFilter);
+		p = lf_parse_int(p, &inst->rotationAngle);
+		p = lf_parse_int(p, &inst->spin);
+		p = lf_parse_int(p, &inst->showRing);
+		p = lf_parse_int(p, &inst->anamorphic);
+		p = lf_parse_int(p, &inst->maxFlares);
 	} else {
-		if (!spi_read_i32be(ls, &v) || v != LENSFLARE_OBJECT_VERSION)
+		if (!spi_read_i32be(ls, &v) || v != SPECFLARE_OBJECT_VERSION)
 			return 0;
-		if (!spi_read_i32be(ls, &inst->threshold)) return 0;
-		if (!spi_read_i32be(ls, &inst->glowRadius)) return 0;
-		if (!spi_read_i32be(ls, &inst->streakLength)) return 0;
-		if (!spi_read_i32be(ls, &inst->intensity)) return 0;
-		if (!spi_read_i32be(ls, &inst->streakCount)) return 0;
-		if (!spi_read_i32be(ls, &inst->randomRotation)) return 0;
-		if (!spi_read_i32be(ls, &inst->showRing)) return 0;
-		if (!spi_read_i32be(ls, &inst->anamorphic)) return 0;
-		if (!spi_read_i32be(ls, &inst->maxFlares)) return 0;
+		if (!spi_read_i32be(ls, &threshold)) return 0;
+		if (!spi_read_i32be(ls, &glowRadius)) return 0;
+		if (!spi_read_i32be(ls, &streakLength)) return 0;
+		if (!spi_read_i32be(ls, &intensity)) return 0;
+		if (!spi_read_i32be(ls, &starFilter)) return 0;
+		if (!spi_read_i32be(ls, &rotationAngle)) return 0;
+		if (!spi_read_i32be(ls, &spin)) return 0;
+		if (!spi_read_i32be(ls, &showRing)) return 0;
+		if (!spi_read_i32be(ls, &anamorphic)) return 0;
+		if (!spi_read_i32be(ls, &maxFlares)) return 0;
+		inst->threshold = threshold;
+		inst->glowRadius = glowRadius;
+		inst->streakLength = streakLength;
+		inst->intensity = intensity;
+		inst->starFilter = starFilter;
+		inst->rotationAngle = rotationAngle;
+		inst->spin = spin;
+		inst->showRing = showRing;
+		inst->anamorphic = anamorphic;
+		inst->maxFlares = maxFlares;
 	}
-	if (inst->maxFlares < 1) inst->maxFlares = 1;
-	if (inst->maxFlares > 50) inst->maxFlares = 50;
-
-	if (inst->threshold < 0) inst->threshold = 0;
-	if (inst->threshold > 255) inst->threshold = 255;
-
+	ClampSettings(inst);
 	return 0;
 }
 
 XCALL_(static LWError)
-Save(LensFlareInst *inst, const LWSaveState *ss)
+Save(SpecFlareInst *inst, const LWSaveState *ss)
 {
-	char buf[64];
 	int pos = 0;
 	XCALL_INIT;
 
-	lf_append_int(buf, &pos, inst->threshold);
-	lf_append_int(buf, &pos, inst->glowRadius);
-	lf_append_int(buf, &pos, inst->streakLength);
-	lf_append_int(buf, &pos, inst->intensity);
-	lf_append_int(buf, &pos, inst->streakCount);
-	lf_append_int(buf, &pos, inst->randomRotation);
-	lf_append_int(buf, &pos, inst->showRing);
-	lf_append_int(buf, &pos, inst->anamorphic);
-	lf_append_int(buf, &pos, inst->maxFlares);
+	inst->ioBuffer[0] = '\0';
+	lf_append_int(inst->ioBuffer, &pos, SPECFLARE_OBJECT_VERSION);
+	lf_append_int(inst->ioBuffer, &pos, inst->threshold);
+	lf_append_int(inst->ioBuffer, &pos, inst->glowRadius);
+	lf_append_int(inst->ioBuffer, &pos, inst->streakLength);
+	lf_append_int(inst->ioBuffer, &pos, inst->intensity);
+	lf_append_int(inst->ioBuffer, &pos, inst->starFilter);
+	lf_append_int(inst->ioBuffer, &pos, inst->rotationAngle);
+	lf_append_int(inst->ioBuffer, &pos, inst->spin);
+	lf_append_int(inst->ioBuffer, &pos, inst->showRing);
+	lf_append_int(inst->ioBuffer, &pos, inst->anamorphic);
+	lf_append_int(inst->ioBuffer, &pos, inst->maxFlares);
 
 	if (ss->ioMode == LWIO_SCENE) {
-		spi_write_line(ss, buf);
+		spi_write_line(ss, inst->ioBuffer);
 	} else {
-		spi_write_i32be(ss, LENSFLARE_OBJECT_VERSION);
+		spi_write_i32be(ss, SPECFLARE_OBJECT_VERSION);
 		spi_write_i32be(ss, inst->threshold);
 		spi_write_i32be(ss, inst->glowRadius);
 		spi_write_i32be(ss, inst->streakLength);
 		spi_write_i32be(ss, inst->intensity);
-		spi_write_i32be(ss, inst->streakCount);
-		spi_write_i32be(ss, inst->randomRotation);
+		spi_write_i32be(ss, inst->starFilter);
+		spi_write_i32be(ss, inst->rotationAngle);
+		spi_write_i32be(ss, inst->spin);
 		spi_write_i32be(ss, inst->showRing);
 		spi_write_i32be(ss, inst->anamorphic);
 		spi_write_i32be(ss, inst->maxFlares);
@@ -272,31 +379,36 @@ Save(LensFlareInst *inst, const LWSaveState *ss)
 }
 
 XCALL_(static void)
-Process(LensFlareInst *inst, const FilterAccess *fa)
+Process(SpecFlareInst *inst, const FilterAccess *fa)
 {
 	FlareSource *detect;
 	FlareSource *flares;
-	int numDetect = 0, numFlares = 0;
+	StarDirection *stars = 0;
+	int numDetect = 0, numFlares = 0, numStars = 0;
 	int x, y, i, s;
 	double inten;
-	int thresh, gradR, strkLen, nStrk;
+	int thresh, gradR, strkLen;
 
 	XCALL_INIT;
 
 	detect = (FlareSource *)plugin_alloc(sizeof(FlareSource) * MAX_DETECT);
 	flares = (FlareSource *)plugin_alloc(sizeof(FlareSource) * MAX_FLARES);
-	if (!detect || !flares) {
+	if (inst->starFilter) {
+		stars = (StarDirection *)plugin_alloc(
+			sizeof(StarDirection) * MAX_STAR_DIRECTIONS);
+	}
+	if (!detect || !flares || (inst->starFilter && !stars)) {
+		if (stars) plugin_free(stars);
 		if (detect) plugin_free(detect);
 		if (flares) plugin_free(flares);
 		return;
 	}
 
-	thresh  = inst->threshold;
-	gradR   = inst->glowRadius;
+	if (stars) numStars = BuildStarDirections(inst, fa->frame, stars);
+	thresh = inst->threshold;
+	gradR = inst->glowRadius;
 	strkLen = inst->streakLength;
-	inten   = inst->intensity / 100.0;
-	nStrk   = inst->streakCount;
-	if (nStrk > 6) nStrk = 6;
+	inten = inst->intensity / 100.0;
 
 	for (y = 0; y < fa->height; y++) {
 		BufferValue *rLine = (*fa->bufLine)(LWBUF_RED, y);
@@ -375,15 +487,12 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 		if (areaScale > 2.0) areaScale = 2.0;
 		if (areaScale < 0.15) areaScale = 0.15;
 		dscale *= areaScale;
-		{
-			int sg = (int)(gradR * dscale);
-			int sl = (int)(strkLen * dscale);
-			if (sg < 4) sg = 4;
-			if (sl < 4) sl = 4;
-			flares[i].brightness |= (sg << 16);
-			flares[i].depth = (double)(sg * sg);
-			flares[i].y = flares[i].y | (sl << 16);
-		}
+		flares[i].glowRadius = (int)(gradR * dscale);
+		flares[i].streakLength = (int)(strkLen * dscale);
+		if (flares[i].glowRadius < 4) flares[i].glowRadius = 4;
+		if (flares[i].streakLength < 4) flares[i].streakLength = 4;
+		flares[i].depth = (double)(flares[i].glowRadius
+		                         * flares[i].glowRadius);
 	}
 
 	for (y = 0; y < fa->height; y++) {
@@ -397,10 +506,10 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 			double fR = 0.0, fG = 0.0, fB = 0.0;
 
 			for (i = 0; i < numFlares; i++) {
-				int fx = flares[i].x & 0xFFFF;
-				int fy = flares[i].y & 0xFFFF;
-				int sGlow = (flares[i].brightness >> 16) & 0x7FFF;
-				int sStrk = (flares[i].y >> 16) & 0x7FFF;
+				int fx = flares[i].x;
+				int fy = flares[i].y;
+				int sGlow = flares[i].glowRadius;
+				int sStrk = flares[i].streakLength;
 				int idx = x - fx;
 				int idy = y - fy;
 				int ir2, imaxR;
@@ -409,15 +518,13 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 
 				imaxR = sGlow * 4;
 				if (sStrk > imaxR) imaxR = sStrk;
-				if (inst->anamorphic) {
-					int aMax = sStrk * 6;
-					if (aMax > imaxR) imaxR = aMax;
-				}
+				if (inst->anamorphic && sStrk * 4 > imaxR)
+					imaxR = sStrk * 4;
 				ir2 = idx * idx + idy * idy;
 				if (ir2 > imaxR * imaxR) continue;
 
 				sGlow2 = flares[i].depth;
-				bright = (double)(flares[i].brightness & 0xFF) / 255.0;
+				bright = (double)flares[i].brightness / 255.0;
 				dx = (double)idx;
 				dy = (double)idy;
 				r2 = (double)ir2;
@@ -442,13 +549,13 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 					if (rdiff < ringR2 * 0.3) {
 						double ringI = (1.0 - rdiff / (ringR2 * 0.3))
 						             * inten * bright * 0.5;
-						tR += ringI * 1.0;
+						tR += ringI;
 						tG += ringI * 0.3;
 						tB += ringI * 0.8;
 					}
 				}
 
-			if (inst->anamorphic) {
+				if (inst->anamorphic) {
 					double ax = dx > 0 ? dx : -dx;
 					double aLen = (double)sStrk * 4.0;
 					if (ax < aLen) {
@@ -457,29 +564,27 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 						double h = hfade * hfade * hw * inten * bright * 0.7;
 						tR += h * 0.3;
 						tG += h * 0.5;
-						tB += h * 1.0;
+						tB += h;
 					}
 				}
 
-				if (nStrk > 0) {
-					double sdx = dx, sdy = dy;
-					if (inst->randomRotation) {
-						int ri = ((fx * 7 + fy * 13) >> 2) & 7;
-						sdx = dx * rot_cos[ri] + dy * rot_sin[ri];
-						sdy = -dx * rot_sin[ri] + dy * rot_cos[ri];
-					}
-					for (s = 0; s < nStrk; s++) {
-						double along = sdx * streak_dx[s] + sdy * streak_dy[s];
-						double perp  = sdx * streak_dy[s] - sdy * streak_dx[s];
-						double p2 = perp * perp;
-						if (along < 0.0) along = -along;
+				for (s = 0; s < numStars; s++) {
+					long along = (long)idx * stars[s].dx
+					           + (long)idy * stars[s].dy;
+					long perp = (long)idx * stars[s].dy
+					          - (long)idy * stars[s].dx;
+					long length = (long)sStrk * stars[s].lengthScale;
 
-						if (along > 0.0 && along < (double)sStrk && p2 < 16.0) {
-							double fade = 1.0 - along / (double)sStrk;
-							double width = 1.0 / (1.0 + p2 * 0.5);
-							double sk = fade * width * inten * bright * 0.6;
-							tR += sk; tG += sk * 0.85; tB += sk * 0.7;
-						}
+					if (along > 0 && along < length
+					 && perp > -4 * STAR_DIRECTION_SCALE
+					 && perp < 4 * STAR_DIRECTION_SCALE) {
+						double fade = 1.0 - (double)along / (double)length;
+						double p = (double)perp * (1.0 / (double)STAR_DIRECTION_SCALE);
+						double width = 1.0 / (1.0 + p * p * 0.5);
+						double sk = fade * width * inten * bright * 0.6
+						          * (double)stars[s].intensityScale
+						          * (1.0 / (double)STAR_DIRECTION_SCALE);
+						tR += sk; tG += sk * 0.85; tB += sk * 0.7;
 					}
 				}
 
@@ -507,12 +612,13 @@ Process(LensFlareInst *inst, const FilterAccess *fa)
 		}
 	}
 
+	if (stars) plugin_free(stars);
 	plugin_free(flares);
 	plugin_free(detect);
 }
 
 XCALL_(static unsigned int)
-Flags(LensFlareInst *inst)
+Flags(SpecFlareInst *inst)
 {
 	XCALL_INIT;
 	return 0;
@@ -522,58 +628,65 @@ Flags(LensFlareInst *inst)
  * Interface
  * ---------------------------------------------------------------- */
 
-static const char *starItems[] = { "Off", "2", "4", "6", 0 };
-static int starValues[] = { 0, 2, 4, 6 };
+static const char *starItems[] = {
+	"Off",
+	"2 Point",
+	"2+2 Point",
+	"4 Point",
+	"4+4 Point",
+	"6 Point",
+	"6+6 Point",
+	"8 Point",
+	"8+8 Point",
+	"10 Point",
+	"10+10 Point",
+	0
+};
 
 XCALL_(static int)
 Interface(
 	long             version,
 	GlobalFunc      *global,
-	LensFlareInst   *inst,
+	SpecFlareInst   *inst,
 	void            *serverData)
 {
 	LWPanelFuncs *panl;
 	LWPanelID     pan;
-	LWControl    *ctlThresh, *ctlGlow, *ctlStreak, *ctlInten, *ctlStarN;
-	LWControl    *ctlRandRot, *ctlRing, *ctlAnamorphic, *ctlMaxFlr;
-	int           starIdx;
+	LWControl    *ctlThresh, *ctlGlow, *ctlStreak, *ctlInten, *ctlStar;
+	LWControl    *ctlRotation, *ctlSpin, *ctlRing, *ctlAnamorphic, *ctlMaxFlr;
 
 	XCALL_INIT;
-	if (version != 1)
+	if (version < 1)
 		return AFUNC_BADVERSION;
 
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
 	panl = (LWPanelFuncs *)(*global)(PANEL_SERVICES_NAME, GFUSE_TRANSIENT);
+	static LWPanControlDesc desc;
+	static LWValue ival = {LWT_INTEGER};
 
 	if (panl) {
-		static LWPanControlDesc desc;
-		static LWValue ival = {LWT_INTEGER};
-		static LWValue fval = {LWT_FLOAT};
-		(void)fval;
-
-		pan = PAN_CREATE(panl, "LensFlare v" PLUGIN_VERSION
+		pan = PAN_CREATE(panl, "SpecFlare v" PLUGIN_VERSION
 		                       " (c) D. Panokostas");
 		if (!pan) return AFUNC_OK;
 
 		ctlThresh = SLIDER_CTL(panl, pan, "Threshold", 150, 0, 255);
-		ctlGlow   = INT_CTL(panl, pan, "Glow Radius");
+		ctlGlow = INT_CTL(panl, pan, "Glow Radius");
 		ctlStreak = INT_CTL(panl, pan, "Streak Length");
-		ctlInten  = SLIDER_CTL(panl, pan, "Intensity", 150, 0, 100);
-		ctlStarN  = POPUP_CTL(panl, pan, "Star Filter", starItems);
-		ctlRandRot = BOOL_CTL(panl, pan, "Random Rotation");
-		ctlRing   = BOOL_CTL(panl, pan, "Show Ring");
+		ctlInten = SLIDER_CTL(panl, pan, "Intensity", 150, 0, 100);
+		ctlStar = POPUP_CTL(panl, pan, "Star Filter", starItems);
+		ctlRotation = INT_CTL(panl, pan, "Rotation Angle");
+		ctlSpin = INT_CTL(panl, pan, "Spin");
+		ctlRing = BOOL_CTL(panl, pan, "Show Ring");
 		ctlAnamorphic = BOOL_CTL(panl, pan, "Anamorphic");
-		ctlMaxFlr = SLIDER_CTL(panl, pan, "Max Flares", 150, 1, 50);
+		ctlMaxFlr = SLIDER_CTL(panl, pan, "Max Flares", 150, 1, MAX_FLARES);
 
 		SET_INT(ctlThresh, inst->threshold);
 		SET_INT(ctlGlow, inst->glowRadius);
 		SET_INT(ctlStreak, inst->streakLength);
 		SET_INT(ctlInten, inst->intensity);
-		starIdx = (inst->streakCount <= 0) ? 0
-		        : (inst->streakCount <= 2) ? 1
-		        : (inst->streakCount <= 4) ? 2 : 3;
-		SET_INT(ctlStarN, starIdx);
-		SET_INT(ctlRandRot, inst->randomRotation);
+		SET_INT(ctlStar, inst->starFilter);
+		SET_INT(ctlRotation, inst->rotationAngle);
+		SET_INT(ctlSpin, inst->spin);
 		SET_INT(ctlRing, inst->showRing);
 		SET_INT(ctlAnamorphic, inst->anamorphic);
 		SET_INT(ctlMaxFlr, inst->maxFlares);
@@ -583,24 +696,13 @@ Interface(
 			GET_INT(ctlGlow, inst->glowRadius);
 			GET_INT(ctlStreak, inst->streakLength);
 			GET_INT(ctlInten, inst->intensity);
-			GET_INT(ctlStarN, starIdx);
-			inst->streakCount = (starIdx > 0 && starIdx < 4)
-			                  ? starValues[starIdx] : 0;
-			GET_INT(ctlRandRot, inst->randomRotation);
+			GET_INT(ctlStar, inst->starFilter);
+			GET_INT(ctlRotation, inst->rotationAngle);
+			GET_INT(ctlSpin, inst->spin);
 			GET_INT(ctlRing, inst->showRing);
 			GET_INT(ctlAnamorphic, inst->anamorphic);
 			GET_INT(ctlMaxFlr, inst->maxFlares);
-			if (inst->maxFlares < 1) inst->maxFlares = 1;
-			if (inst->maxFlares > 50) inst->maxFlares = 50;
-
-			if (inst->threshold < 0) inst->threshold = 0;
-			if (inst->threshold > 255) inst->threshold = 255;
-			if (inst->glowRadius < 1) inst->glowRadius = 1;
-			if (inst->glowRadius > 200) inst->glowRadius = 200;
-			if (inst->streakLength < 1) inst->streakLength = 1;
-			if (inst->streakLength > 400) inst->streakLength = 400;
-			if (inst->intensity < 0) inst->intensity = 0;
-			if (inst->intensity > 100) inst->intensity = 100;
+			ClampSettings(inst);
 		}
 
 		PAN_KILL(panl, pan);
@@ -649,9 +751,9 @@ Activate(
  * ---------------------------------------------------------------- */
 
 ServerRecord ServerDesc[] = {
-	{ "ImageFilterHandler",   "LensFlare",
+	{ "ImageFilterHandler",   "SpecFlare",
 	  (ActivateFunc *)Activate },
-	{ "ImageFilterInterface", "LensFlare",
+	{ "ImageFilterInterface", "SpecFlare",
 	  (ActivateFunc *)Interface },
 	{ 0 }
 };
