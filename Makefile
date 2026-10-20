@@ -106,14 +106,14 @@ $(BUILD)/pbr.p: $(BUILD)/pbr.o sdk $(STUBS)
 
 pbr: $(BUILD)/pbr.p
 
-# LensFlare - Specular lens flare image filter
-$(BUILD)/lensflare.o: $(SRC)/lensflare/lensflare.c | $(BUILD)
+# SpecFlare - Specular lens flare image filter
+$(BUILD)/specflare.o: $(SRC)/specflare/specflare.c | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/lensflare.p: $(BUILD)/lensflare.o sdk $(STUBS)
+$(BUILD)/specflare.p: $(BUILD)/specflare.o sdk $(STUBS)
 	$(call build-plugin,$@,$<)
 
-lensflare: $(BUILD)/lensflare.p
+specflare: $(BUILD)/specflare.p
 
 # PNGsaver - PNG image saver
 $(BUILD)/pngsaver.o: $(SRC)/pngsaver/pngsaver.c | $(BUILD)
@@ -180,8 +180,8 @@ geoimport: $(BUILD)/geoimport.p
 
 # ---- Targets ----
 
-PLUGINS = objswap objlist objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon toonshader geoimport
-PLUGIN_FILES = objswap objlist2 objmeshswap fresnel pbr lensflare pngsaver pngloader normalmap motion toon toonshader geoimport
+PLUGINS = objswap objlist objmeshswap fresnel pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
+PLUGIN_FILES = objswap objlist2 objmeshswap fresnel pbr specflare pngsaver pngloader normalmap motion toon toonshader geoimport
 
 all: sdk $(PLUGINS)
 

@@ -91,7 +91,7 @@
 				"Fresnel (shader)"
 				"PBR (shader)"
 				"NormalMap (shader)"
-				"LensFlare (image filter)"
+				"SpecFlare (image filter)"
 				"Toon + ToonShader (cartoon effects)"
 				"Motion (item motion)"
 				"PNGloader + PNGsaver (image I/O)")
@@ -113,7 +113,7 @@
 (set #bit 1 #file "fresnel.p") (P_Plugin)
 (set #bit 2 #file "pbr.p") (P_Plugin)
 (set #bit 3 #file "normalmap.p") (P_Plugin)
-(set #bit 4 #file "lensflare.p") (P_Plugin)
+(set #bit 4 #file "specflare.p") (P_Plugin)
 (set #bit 5 #file "toon.p") (P_Plugin)
 (set #bit 5 #file "toonshader.p") (P_Plugin)
 (set #bit 6 #file "motion.p") (P_Plugin)
