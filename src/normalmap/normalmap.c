@@ -550,11 +550,21 @@ static void axis_normal(int axis, const double rgb[3], int flipY, double sign, d
 	double x = rgb[0] * 2.0 - 1.0;
 	double y = rgb[1] * 2.0 - 1.0;
 	double z = rgb[2];
+	int negSign = sign < 0.0;
 	if (flipY) y = -y;
 	if (z < 0.01) z = 0.01;
-	if (axis == NMAP_PROJ_XZ) { out[0] = x; out[1] = sign * z; out[2] = y; }
-	else if (axis == NMAP_PROJ_YZ) { out[0] = sign * z; out[1] = x; out[2] = y; }
-	else { out[0] = x; out[1] = y; out[2] = sign * z; }
+	/* Keep each projected frame right-handed: U x V must follow the
+	 * outward face normal, so flip the V tilt when it does not. */
+	if (axis == NMAP_PROJ_XZ) {
+		if (!negSign) y = -y;
+		out[0] = x; out[1] = sign * z; out[2] = y;
+	} else if (axis == NMAP_PROJ_YZ) {
+		if (negSign) y = -y;
+		out[0] = sign * z; out[1] = x; out[2] = y;
+	} else {
+		if (negSign) y = -y;
+		out[0] = x; out[1] = y; out[2] = sign * z;
+	}
 	vec_normalize(out);
 }
 
@@ -723,8 +733,10 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	LWImageList *il;
 	LWControl *image[NMAP_SLOT_COUNT], *projection, *tileX, *tileY, *strength, *flipY, *sharpness, *albedoMode;
 	LWControl *amount[NMAP_SLOT_COUNT];
-	const char *items[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT + 2];
-	LWImageID ids[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT];
+	/* Popup tables are static: the modal panel runs on a limited
+	 * callback stack and these arrays alone exceed its budget. */
+	static const char *items[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT + 2];
+	static LWImageID ids[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT];
 	static LWPanControlDesc desc;
 	static LWValue ival = { LWT_INTEGER };
 	static const char *amountLabels[] = { "Albedo amount", "Roughness amount", "Metallic amount", "AO amount", "Specular amount" };
@@ -743,9 +755,13 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	if (il) {
 		LWImageID id = (*il->first)();
 		while (id && count < NMAP_MAX_POPUP_IMAGES) {
-			ids[count] = id;
-			items[count + 1] = (*il->name)(id);
-			count++;
+			const char *n = (*il->name)(id);
+			/* Skip unnamed images: a null entry would truncate the list. */
+			if (n) {
+				ids[count] = id;
+				items[count + 1] = n;
+				count++;
+			}
 			id = (*il->next)(id);
 		}
 	}
