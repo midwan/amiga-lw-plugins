@@ -453,9 +453,9 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 			if (inst->posterize >= 2) {
 				/* Nearest-level quantisation: equal-width input bands, so
 				 * the brightest output level is reachable below 255. */
-				r = ((r * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
-				g = ((g * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
-				b = ((b * inst->posterize + 127) / 255) * 255 / (inst->posterize - 1);
+				r = ((r * (inst->posterize - 1) + 127) / 255) * 255 / (inst->posterize - 1);
+				g = ((g * (inst->posterize - 1) + 127) / 255) * 255 / (inst->posterize - 1);
+				b = ((b * (inst->posterize - 1) + 127) / 255) * 255 / (inst->posterize - 1);
 			}
 			front[base] = (unsigned char)CLAMP_BYTE(r);
 			front[base + 1] = (unsigned char)CLAMP_BYTE(g);
