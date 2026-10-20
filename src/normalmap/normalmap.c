@@ -171,11 +171,10 @@ static const char *base_name(const char *path)
 	return b;
 }
 
-static int same_image_name(const char *stored, const char *listed)
+static int base_name_equal(const char *stored, const char *listed)
 {
 	const char *a, *b;
 	if (!stored || !listed) return 0;
-	if (strcmp(stored, listed) == 0) return 1;
 	/* Layout may list an image without its volume or path prefix. */
 	a = base_name(stored); b = base_name(listed);
 	while (*a && *b) {
@@ -190,15 +189,20 @@ static int same_image_name(const char *stored, const char *listed)
 static LWImageID find_image_by_name(const char *name)
 {
 	LWImageList *il;
-	LWImageID id;
+	LWImageID id, baseMatch = 0;
+	int baseCount = 0;
 	if (!gfunc || !name || !name[0]) return 0;
 	il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
 	if (!il) return 0;
+	/* Exact match wins; a basename match binds only when unique. */
 	for (id = (*il->first)(); id; id = (*il->next)(id)) {
 		const char *n = (*il->name)(id);
-		if (same_image_name(name, n)) return id;
+		if (!n) continue;
+		if (strcmp(n, name) == 0) return id;
+		if (!baseMatch && base_name_equal(name, n)) baseMatch = id;
+		if (base_name_equal(name, n)) baseCount++;
 	}
-	return 0;
+	return baseCount == 1 ? baseMatch : 0;
 }
 
 static void refresh_name(MapSlot *slot)
