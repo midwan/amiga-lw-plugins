@@ -608,7 +608,7 @@ Process(SpecFlareInst *inst, const FilterAccess *fa)
 				rgb[1] = gLine[x];
 				rgb[2] = bLine[x];
 			}
-			(*fa->setRGB)(x, y, rgb);
+			spi_set_rgb(fa, x, y, rgb);
 		}
 	}
 

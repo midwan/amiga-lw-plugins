@@ -398,7 +398,7 @@ Process(ToonInst *inst, const FilterAccess *fa)
 				rgb[2] = (BufferValue)b;
 			}
 
-			(*fa->setRGB)(x, y, rgb);
+			spi_set_rgb(fa, x, y, rgb);
 		}
 	}
 
@@ -424,7 +424,7 @@ Process(ToonInst *inst, const FilterAccess *fa)
 					rgb[0] = (BufferValue)inst->outlineR;
 					rgb[1] = (BufferValue)inst->outlineG;
 					rgb[2] = (BufferValue)inst->outlineB;
-					(*fa->setRGB)(x, y, rgb);
+					spi_set_rgb(fa, x, y, rgb);
 				}
 			}
 		}

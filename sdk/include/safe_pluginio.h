@@ -149,4 +149,40 @@ spi_write_string_record(const LWSaveState *ss, const char *buf)
 	}
 }
 
+/*
+ * LightWave 5.00r's FilterAccess setRGB returns with a6 changed, although
+ * a6 is callee-saved in the m68k calling convention (bufLine and setAlpha
+ * do preserve it). GCC may keep a loop pointer in a6 across the call; the
+ * corrupted pointer then hangs or crashes the filter. Call setRGB through
+ * spi_set_rgb, which saves a6 around the host call.
+ */
+#ifdef __HAVE_68881__
+#define SPI_FP_CLOBBERS , "fp0", "fp1"
+#else
+#define SPI_FP_CLOBBERS
+#endif
+
+static void
+SPI_UNUSED
+spi_set_rgb(const FilterAccess *fa, int x, int y, BufferValue rgb[3])
+{
+#ifdef __GNUC__
+	void (*fn)(int, int, BufferValue *) = fa->setRGB;
+
+	__asm__ __volatile__(
+		"move.l a6,-(sp)\n\t"
+		"move.l %3,-(sp)\n\t"
+		"move.l %2,-(sp)\n\t"
+		"move.l %1,-(sp)\n\t"
+		"jsr (%0)\n\t"
+		"lea 12(sp),sp\n\t"
+		"move.l (sp)+,a6"
+		:
+		: "a" (fn), "r" (x), "r" (y), "r" (rgb)
+		: "d0", "d1", "a0", "a1", "cc", "memory" SPI_FP_CLOBBERS);
+#else
+	(*fa->setRGB)(x, y, rgb);
+#endif
+}
+
 #endif
