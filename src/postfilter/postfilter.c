@@ -497,7 +497,7 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 			BufferValue rgb[3];
 			unsigned long base = ((unsigned long)y * fa->width + x) * 3;
 			rgb[0] = front[base]; rgb[1] = front[base + 1]; rgb[2] = front[base + 2];
-			(*fa->setRGB)(x, y, rgb);
+			spi_set_rgb(fa, x, y, rgb);
 			(*fa->setAlpha)(x, y, alpha ? alpha[x] : 255);
 		}
 	}

@@ -339,6 +339,21 @@ Observed with LightwaveRTG (Modeler 5.00f, Layout 5.00r) in Amiberry (`geoimport
 
 ---
 
+## Image filter details (`ImageFilterHandler`, `FilterAccess`)
+
+Observed with LightwaveRTG (Layout 5.00r) in Amiberry:
+
+- **`setRGB` returns with `a6` changed** (it came back as `$40004E24`),
+  although `a6` is callee-saved. `setAlpha` preserves all callee-saved
+  registers, `bufLine` preserves `a6`, and `setRGB` preserves the others (`d2`-`d7`,
+  `a2`-`a5`, `fp2`-`fp7`). If GCC keeps a pointer in `a6` across the call,
+  the filter hangs or crashes (SpecFlare's FPU builds hung on "Applying",
+  issue #35). Always call it through `spi_set_rgb()` from
+  `safe_pluginio.h`, never `(*fa->setRGB)()` directly.
+- `bufLine(LWBUF_DEPTH)` returns NULL; image filters get no depth data.
+
+---
+
 ## Config file registration
 
 Plugins are registered in LightWave's config file (e.g., `MOD-config` on Amiga):
