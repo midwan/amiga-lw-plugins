@@ -24,6 +24,7 @@
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
@@ -137,20 +138,6 @@ int_to_str(int val, char *buf, int buflen)
 			buf[neg + j] = tmp[i - 1 - j];
 	}
 	buf[len] = '\0';
-}
-
-static void
-str_copy_bounded(char *dst, int dstMax, const char *src)
-{
-	if (!dst || dstMax < 1)
-		return;
-
-	dst[0] = '\0';
-	if (!src)
-		return;
-
-	strncpy(dst, src, dstMax - 1);
-	dst[dstMax - 1] = '\0';
 }
 
 static void
@@ -297,7 +284,7 @@ file_exists(const char *path)
 {
 	BPTR lock;
 
-	lock = Lock((STRPTR)path, ACCESS_READ);
+	lock = quiet_lock(path, ACCESS_READ);
 	if (!lock)
 		return 0;
 
@@ -358,7 +345,7 @@ open_lwo(BPTR *fh, const char *path, unsigned long *formSize,
 {
 	unsigned char id[4];
 
-	*fh = Open((STRPTR)path, MODE_OLDFILE);
+	*fh = quiet_open(path, MODE_OLDFILE);
 	if (!*fh)
 		return 0;
 
@@ -397,7 +384,7 @@ make_surface_preserved_copy(const char *src, const char *surfaceSrc,
 	if (!open_lwo(&in, src, &formSize, formType))
 		return 0;
 
-	out = Open((STRPTR)dest, MODE_NEWFILE);
+	out = quiet_open(dest, MODE_NEWFILE);
 	if (!out)
 		goto done;
 
@@ -522,8 +509,7 @@ surface_preserved_filename(ObjMeshSwapInst *inst, const char *src)
 	made = make_surface_preserved_copy(src, inst->basePath,
 	                                   inst->cacheTempPath);
 
-	strncpy(inst->cacheSrc, src, MAX_PATH - 1);
-	inst->cacheSrc[MAX_PATH - 1] = '\0';
+	spi_copy_string(inst->cacheSrc, MAX_PATH, src);
 
 	if (made == 1) {
 		if (!Rename((STRPTR)inst->cacheTempPath,
@@ -579,12 +565,10 @@ split_path(const char *fullpath, char *dir, int dirmax,
 		if (len >= dirmax) len = dirmax - 1;
 		memcpy(dir, fullpath, len);
 		dir[len] = '\0';
-		strncpy(file, lastSep + 1, filemax - 1);
-		file[filemax - 1] = '\0';
+		spi_copy_string(file, filemax, lastSep + 1);
 	} else {
 		dir[0] = '\0';
-		strncpy(file, fullpath, filemax - 1);
-		file[filemax - 1] = '\0';
+		spi_copy_string(file, filemax, fullpath);
 	}
 }
 
@@ -604,8 +588,7 @@ extract_base_name(const char *filename, char *base, int basemax)
 		memcpy(base, filename, len);
 		base[len] = '\0';
 	} else {
-		strncpy(base, filename, basemax - 1);
-		base[basemax - 1] = '\0';
+		spi_copy_string(base, basemax, filename);
 	}
 
 	for (p = base; *p; p++) {
@@ -739,9 +722,9 @@ do_scan(ObjMeshSwapInst *inst)
 		return;
 
 	if (inst->baseDir[0])
-		lock = Lock((STRPTR)inst->baseDir, ACCESS_READ);
+		lock = quiet_lock(inst->baseDir, ACCESS_READ);
 	else
-		lock = Lock((STRPTR)"", ACCESS_READ);
+		lock = quiet_lock("", ACCESS_READ);
 
 	if (!lock)
 		return;
@@ -807,13 +790,11 @@ do_scan(ObjMeshSwapInst *inst)
 		{
 			dest = inst->origPath;
 			if (dirLen > 0) {
-				strncpy(dest, inst->baseDir, MAX_PATH - 1);
-				dest[MAX_PATH - 1] = '\0';
+				spi_copy_string(dest, MAX_PATH, inst->baseDir);
 				strncat(dest, fname,
 				        MAX_PATH - 1 - dirLen);
 			} else {
-				strncpy(dest, fname, MAX_PATH - 1);
-				dest[MAX_PATH - 1] = '\0';
+				spi_copy_string(dest, MAX_PATH, fname);
 			}
 		}
 
@@ -848,16 +829,13 @@ do_scan(ObjMeshSwapInst *inst)
 		/* Build full path directly into entry (no stack buffer) */
 		dest = inst->entries[inst->numEntries].filename;
 		if (dirLen > 0) {
-			strncpy(dest, inst->baseDir, MAX_PATH - 1);
-			dest[MAX_PATH - 1] = '\0';
+			spi_copy_string(dest, MAX_PATH, inst->baseDir);
 			strncat(dest,
 			        (const char *)fib->fib_FileName,
 			        MAX_PATH - 1 - dirLen);
 		} else {
-			strncpy(dest,
-			        (const char *)fib->fib_FileName,
-			        MAX_PATH - 1);
-			dest[MAX_PATH - 1] = '\0';
+			spi_copy_string(dest, MAX_PATH,
+			                (const char *)fib->fib_FileName);
 		}
 
 		inst->entries[inst->numEntries].frame = frame;
@@ -876,8 +854,7 @@ do_scan(ObjMeshSwapInst *inst)
 static void
 scan_from_path(ObjMeshSwapInst *inst, const char *objPath)
 {
-	strncpy(inst->basePath, objPath, MAX_PATH - 1);
-	inst->basePath[MAX_PATH - 1] = '\0';
+	spi_copy_string(inst->basePath, MAX_PATH, objPath);
 	inst->cacheSrc[0] = '\0';
 	inst->cachePath[0] = '\0';
 	inst->cacheTempPath[0] = '\0';
@@ -1038,10 +1015,8 @@ ui_entryName(void *data, int idx)
 	strcat(ui_buf, numBuf);
 	strcat(ui_buf, ": ");
 	len = strlen(ui_buf);
-	strncpy(ui_buf + len,
-	        ui_inst->entries[idx].filename,
-	        sizeof(ui_buf) - len - 1);
-	ui_buf[sizeof(ui_buf) - 1] = '\0';
+	spi_copy_string(ui_buf + len, (int)(sizeof(ui_buf) - len),
+	                ui_inst->entries[idx].filename);
 	return ui_buf;
 }
 
@@ -1081,8 +1056,8 @@ Interface(
 			goto fallback;
 
 		if (inst->baseName[0]) {
-			str_copy_bounded(infoBuf, sizeof(inst->messageBuf),
-			                 "Base Object: ");
+			spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+			                "Base Object: ");
 			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
 			                   inst->baseName);
 			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
@@ -1094,9 +1069,9 @@ Interface(
 			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
 			                   " files");
 		} else {
-			str_copy_bounded(infoBuf, sizeof(inst->messageBuf),
-			                 "No object scanned yet. "
-			                 "Preview a frame first.");
+			spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+			                "No object scanned yet. "
+			                "Preview a frame first.");
 		}
 
 		infoLines[0] = infoBuf;
@@ -1126,7 +1101,7 @@ fallback:
 		return AFUNC_BADGLOBAL;
 
 	if (inst->numEntries > 0) {
-		str_copy_bounded(infoBuf, sizeof(inst->messageBuf), "Found ");
+		spi_copy_string(infoBuf, sizeof(inst->messageBuf), "Found ");
 		int_to_str(inst->numEntries, numBuf,
 		           sizeof(inst->numberBuf));
 		str_append_bounded(infoBuf, sizeof(inst->messageBuf), numBuf);
@@ -1136,8 +1111,8 @@ fallback:
 		                   inst->baseName);
 		(*msg->info)("ObjMeshSwap", infoBuf);
 	} else if (inst->basePath[0]) {
-		str_copy_bounded(infoBuf, sizeof(inst->messageBuf),
-		                 "No replacements for ");
+		spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+		                "No replacements for ");
 		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
 		                   inst->baseName);
 		(*msg->info)("ObjMeshSwap", infoBuf);

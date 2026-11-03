@@ -18,6 +18,7 @@
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
+#include <trig_approx.h>
 
 #include <string.h>
 
@@ -25,8 +26,6 @@
 #include <exec/memory.h>
 
 extern struct ExecBase *SysBase;
-extern double sin(double);
-extern double sqrt(double);
 
 /* ----------------------------------------------------------------
  * Memory helpers
@@ -167,6 +166,9 @@ noise_fbm(double t, unsigned int seed, int octaves)
 #define NUM_MODES    3
 
 #define MOTION_OBJECT_VERSION  1
+/* Scene line: 14 fields of up to 11 characters plus separators.
+ * Amplitudes and shakeStart have no upper limit. */
+#define MOTION_LINE_MAX        (14 * 12 + 1)
 
 /* ----------------------------------------------------------------
  * Types
@@ -203,6 +205,22 @@ typedef struct {
  * ---------------------------------------------------------------- */
 
 static MessageFuncs *msg;
+static GlobalFunc   *gfunc;
+
+/* Scene frame rate for converting shakeStart (a frame number) to time.
+ * Falls back to 30 if the global is missing or holds an odd value. */
+static double
+scene_fps(void)
+{
+	LWSceneInfo *si;
+
+	if (!gfunc)
+		return 30.0;
+	si = (LWSceneInfo *)(*gfunc)("LW Scene Info", GFUSE_TRANSIENT);
+	if (!si || !(si->framesPerSecond >= 1.0 && si->framesPerSecond <= 1000.0))
+		return 30.0;
+	return si->framesPerSecond;
+}
 
 /* ----------------------------------------------------------------
  * Handler callbacks
@@ -251,10 +269,24 @@ Copy(MotionInst *from, MotionInst *to, LWItemID item)
 	return 0;
 }
 
+/* Same limits as the panel; scene or object data may be hand-edited. */
+static void
+clamp_settings(MotionInst *inst)
+{
+	if (inst->mode < 0) inst->mode = 0;
+	if (inst->mode >= NUM_MODES) inst->mode = NUM_MODES - 1;
+	if (inst->frequency < 1) inst->frequency = 1;
+	if (inst->frequency > 1000) inst->frequency = 1000;
+	if (inst->octaves < 1) inst->octaves = 1;
+	if (inst->octaves > 4) inst->octaves = 4;
+	if (inst->shakeDecay < 0) inst->shakeDecay = 0;
+	if (inst->shakeDecay > 100) inst->shakeDecay = 100;
+}
+
 XCALL_(static LWError)
 Load(MotionInst *inst, const LWLoadState *ls)
 {
-	char buf[128];
+	char buf[MOTION_LINE_MAX];
 	const char *p;
 	int v;
 	XCALL_INIT;
@@ -296,10 +328,7 @@ Load(MotionInst *inst, const LWLoadState *ls)
 		if (!spi_read_i32be(ls, &inst->octaves)) return 0;
 	}
 
-	if (inst->octaves < 1) inst->octaves = 1;
-	if (inst->octaves > 4) inst->octaves = 4;
-	if (inst->frequency < 1) inst->frequency = 1;
-	if (inst->frequency > 1000) inst->frequency = 1000;
+	clamp_settings(inst);
 
 	return 0;
 }
@@ -307,7 +336,7 @@ Load(MotionInst *inst, const LWLoadState *ls)
 XCALL_(static LWError)
 Save(MotionInst *inst, const LWSaveState *ss)
 {
-	char buf[128];
+	char buf[MOTION_LINE_MAX];
 	int pos = 0;
 	XCALL_INIT;
 
@@ -367,7 +396,7 @@ Evaluate(MotionInst *inst, const ItemMotionAccess *ma)
 		/* Decay envelope: starts at shakeStart frame,
 		 * decays exponentially. Before shakeStart → no effect */
 		double decay = inst->shakeDecay / 100.0;
-		double startTime = (double)inst->shakeStart / 30.0; /* assume 30fps */
+		double startTime = (double)inst->shakeStart / scene_fps();
 		double elapsed = ma->time - startTime;
 		if (elapsed < 0.0) {
 			env = 0.0;
@@ -399,9 +428,9 @@ Evaluate(MotionInst *inst, const ItemMotionAccess *ma)
 		if (inst->mode == MODE_BOUNCE) {
 			double phase;
 			phase = t * 2.0 * PI;
-			pos[0] += sin(phase)                * (inst->ampX / 100.0) * env;
-			pos[1] += sin(phase + PI * 0.333)   * (inst->ampY / 100.0) * env;
-			pos[2] += sin(phase + PI * 0.667)   * (inst->ampZ / 100.0) * env;
+			pos[0] += sin_approx(phase)              * (inst->ampX / 100.0) * env;
+			pos[1] += sin_approx(phase + PI * 0.333) * (inst->ampY / 100.0) * env;
+			pos[2] += sin_approx(phase + PI * 0.667) * (inst->ampZ / 100.0) * env;
 		} else {
 			/* Wiggle or Shake — noise-based */
 			int oct = inst->octaves;
@@ -422,9 +451,9 @@ Evaluate(MotionInst *inst, const ItemMotionAccess *ma)
 
 		if (inst->mode == MODE_BOUNCE) {
 			double phase = t * 2.0 * PI;
-			rot[0] += sin(phase)                * (inst->rotAmpX / 10.0) * degToRad * env;
-			rot[1] += sin(phase + PI * 0.333)   * (inst->rotAmpY / 10.0) * degToRad * env;
-			rot[2] += sin(phase + PI * 0.667)   * (inst->rotAmpZ / 10.0) * degToRad * env;
+			rot[0] += sin_approx(phase)              * (inst->rotAmpX / 10.0) * degToRad * env;
+			rot[1] += sin_approx(phase + PI * 0.333) * (inst->rotAmpY / 10.0) * degToRad * env;
+			rot[2] += sin_approx(phase + PI * 0.667) * (inst->rotAmpZ / 10.0) * degToRad * env;
 		} else {
 			int oct = inst->octaves;
 			rot[0] += noise_fbm(t, 40000u, oct) * (inst->rotAmpX / 10.0) * degToRad * env;
@@ -541,15 +570,7 @@ Interface(
 			GET_INT(ctlShakeStart, inst->shakeStart);
 			GET_INT(ctlDecay, inst->shakeDecay);
 
-			/* Clamp */
-			if (inst->mode < 0) inst->mode = 0;
-			if (inst->mode >= NUM_MODES) inst->mode = NUM_MODES - 1;
-			if (inst->frequency < 1) inst->frequency = 1;
-			if (inst->frequency > 1000) inst->frequency = 1000;
-			if (inst->octaves < 1) inst->octaves = 1;
-			if (inst->octaves > 4) inst->octaves = 4;
-			if (inst->shakeDecay < 0) inst->shakeDecay = 0;
-			if (inst->shakeDecay > 100) inst->shakeDecay = 100;
+			clamp_settings(inst);
 		}
 
 		PAN_KILL(panl, pan);
@@ -585,10 +606,10 @@ Activate(
 	h->useItems = 0;
 	h->changeID = 0;
 
+	gfunc = global;
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
 	if (!msg)
 		return AFUNC_BADGLOBAL;
-
 	return AFUNC_OK;
 }
 

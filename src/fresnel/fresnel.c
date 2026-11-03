@@ -142,6 +142,22 @@ compute_f0(FresnelInst *inst)
 	}
 }
 
+/* Same limits as the panel; scene or object data may be hand-edited. */
+static void
+clamp_settings(FresnelInst *inst)
+{
+	if (inst->ior < 1.0) inst->ior = 1.0;
+	if (inst->ior > 5.0) inst->ior = 5.0;
+	if (inst->reflPower < 1) inst->reflPower = 1;
+	if (inst->reflPower > 10) inst->reflPower = 10;
+	if (inst->diffPower < 1) inst->diffPower = 1;
+	if (inst->diffPower > 10) inst->diffPower = 10;
+	inst->affectMirror   = inst->affectMirror != 0;
+	inst->affectTrans    = inst->affectTrans != 0;
+	inst->affectDiffuse  = inst->affectDiffuse != 0;
+	inst->affectSpecular = inst->affectSpecular != 0;
+}
+
 /* ----------------------------------------------------------------
  * Handler callbacks
  * ---------------------------------------------------------------- */
@@ -246,6 +262,7 @@ Load(FresnelInst *inst, const LWLoadState *ls)
 		if (!spi_read_i32be(ls, &inst->affectSpecular)) return 0;
 	}
 
+	clamp_settings(inst);
 	compute_f0(inst);
 	return 0;
 }
@@ -434,12 +451,7 @@ Interface(
 			GET_INT(ctlDiffPow, inst->diffPower);
 			GET_INT(ctlSpecular, inst->affectSpecular);
 
-			if (inst->ior < 1.0) inst->ior = 1.0;
-			if (inst->ior > 5.0) inst->ior = 5.0;
-			if (inst->reflPower < 1) inst->reflPower = 1;
-			if (inst->reflPower > 10) inst->reflPower = 10;
-			if (inst->diffPower < 1) inst->diffPower = 1;
-			if (inst->diffPower > 10) inst->diffPower = 10;
+			clamp_settings(inst);
 
 			compute_f0(inst);
 		}

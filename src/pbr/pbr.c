@@ -159,6 +159,30 @@ compute_f0(PBRInst *inst)
 	inst->f0 = r * r;
 }
 
+/* Same limits as the panel; scene or object data may be hand-edited. */
+static void
+clamp_settings(PBRInst *inst)
+{
+	if (inst->ior < 1.0) inst->ior = 1.0;
+	if (inst->ior > 5.0) inst->ior = 5.0;
+	if (inst->metallic < 0) inst->metallic = 0;
+	if (inst->metallic > 100) inst->metallic = 100;
+	if (inst->roughAmount < 0) inst->roughAmount = 0;
+	if (inst->roughAmount > 100) inst->roughAmount = 100;
+	if (inst->aoStrength < 0) inst->aoStrength = 0;
+	if (inst->aoStrength > 100) inst->aoStrength = 100;
+	if (inst->blurReflSamples < 0) inst->blurReflSamples = 0;
+	if (inst->blurReflSamples > 8) inst->blurReflSamples = 8;
+	if (inst->blurReflAmount < 0) inst->blurReflAmount = 0;
+	if (inst->blurReflAmount > 100) inst->blurReflAmount = 100;
+	if (inst->envStrength < 0) inst->envStrength = 0;
+	if (inst->envStrength > 100) inst->envStrength = 100;
+	inst->roughEnabled    = inst->roughEnabled != 0;
+	inst->aoEnabled       = inst->aoEnabled != 0;
+	inst->blurReflEnabled = inst->blurReflEnabled != 0;
+	inst->envEnabled      = inst->envEnabled != 0;
+}
+
 static const char *
 parse_int(const char *s, int *val);
 
@@ -381,6 +405,7 @@ Load(PBRInst *inst, const LWLoadState *ls)
 		}
 	}
 
+	clamp_settings(inst);
 	compute_f0(inst);
 	return 0;
 }
@@ -726,17 +751,7 @@ Interface(
 			inst->envEnabled = (envIdx > 0) ? 1 : 0;
 			GET_INT(ctlEnvStr, inst->envStrength);
 
-			/* Clamp */
-			if (inst->ior < 1.0) inst->ior = 1.0;
-			if (inst->ior > 5.0) inst->ior = 5.0;
-			if (inst->roughAmount < 0) inst->roughAmount = 0;
-			if (inst->roughAmount > 100) inst->roughAmount = 100;
-			if (inst->aoStrength < 0) inst->aoStrength = 0;
-			if (inst->aoStrength > 100) inst->aoStrength = 100;
-			if (inst->blurReflAmount < 0) inst->blurReflAmount = 0;
-			if (inst->blurReflAmount > 100) inst->blurReflAmount = 100;
-			if (inst->envStrength < 0) inst->envStrength = 0;
-			if (inst->envStrength > 100) inst->envStrength = 100;
+			clamp_settings(inst);
 
 			compute_f0(inst);
 		}

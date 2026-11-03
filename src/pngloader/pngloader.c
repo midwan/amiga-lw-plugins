@@ -14,6 +14,7 @@
 
 #include <splug.h>
 #include <image.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
@@ -180,6 +181,15 @@ typedef struct {
 	unsigned short symbol[MAXCODES];
 } Huffman;
 
+/* Shared work area for the block decoders -- allocated once by inflate()
+ * and passed down, so no function puts large tables on the stack. */
+typedef struct {
+	Huffman       litlen;
+	Huffman       dist;
+	Huffman       codelen;
+	unsigned short lengths[MAXCODES];
+} InflateWork;
+
 static int
 huff_build(Huffman *h, const unsigned short *lengths, int n)
 {
@@ -320,31 +330,31 @@ inflate_stored(BitReader *br, unsigned char *out,
 }
 
 static int
-inflate_fixed(BitReader *br, unsigned char *out,
-              unsigned long outLen, unsigned long *outPos)
+inflate_fixed(BitReader *br, InflateWork *w,
+              unsigned char *out, unsigned long outLen,
+              unsigned long *outPos)
 {
-	Huffman litlen, dist;
-	unsigned short lengths[320];
+	unsigned short *lengths = w->lengths;
 	int i;
 
 	for (i = 0;   i < 144; i++) lengths[i] = 8;
 	for (i = 144; i < 256; i++) lengths[i] = 9;
 	for (i = 256; i < 280; i++) lengths[i] = 7;
 	for (i = 280; i < 288; i++) lengths[i] = 8;
-	huff_build(&litlen, lengths, 288);
+	huff_build(&w->litlen, lengths, 288);
 
 	for (i = 0; i < 32; i++) lengths[i] = 5;
-	huff_build(&dist, lengths, 32);
+	huff_build(&w->dist, lengths, 32);
 
-	return inflate_codes(br, &litlen, &dist, out, outLen, outPos);
+	return inflate_codes(br, &w->litlen, &w->dist, out, outLen, outPos);
 }
 
 static int
-inflate_dynamic(BitReader *br, unsigned char *out,
-                unsigned long outLen, unsigned long *outPos)
+inflate_dynamic(BitReader *br, InflateWork *w,
+                unsigned char *out, unsigned long outLen,
+                unsigned long *outPos)
 {
-	Huffman litlen, dist, codelen;
-	unsigned short lengths[320];
+	unsigned short *lengths = w->lengths;
 	int hlit, hdist, hclen;
 	int i, n, total;
 
@@ -358,14 +368,14 @@ inflate_dynamic(BitReader *br, unsigned char *out,
 	memset(lengths, 0, 19 * sizeof(unsigned short));
 	for (i = 0; i < hclen; i++)
 		lengths[cl_order[i]] = (unsigned short)br_bits(br, 3);
-	huff_build(&codelen, lengths, 19);
+	huff_build(&w->codelen, lengths, 19);
 
 	/* decode literal/length + distance code lengths */
 	total = hlit + hdist;
-	memset(lengths, 0, sizeof(lengths));
+	memset(lengths, 0, sizeof(w->lengths));
 	i = 0;
 	while (i < total) {
-		int sym = huff_decode(br, &codelen);
+		int sym = huff_decode(br, &w->codelen);
 		if (sym < 0) return INF_ERR_DATA;
 
 		if (sym < 16) {
@@ -388,10 +398,10 @@ inflate_dynamic(BitReader *br, unsigned char *out,
 		}
 	}
 
-	huff_build(&litlen, lengths, hlit);
-	huff_build(&dist, lengths + hlit, hdist);
+	huff_build(&w->litlen, lengths, hlit);
+	huff_build(&w->dist, lengths + hlit, hdist);
 
-	return inflate_codes(br, &litlen, &dist, out, outLen, outPos);
+	return inflate_codes(br, &w->litlen, &w->dist, out, outLen, outPos);
 }
 
 /*
@@ -406,6 +416,7 @@ inflate(const unsigned char *src, unsigned long srcLen,
         unsigned char *out, unsigned long outLen)
 {
 	BitReader br;
+	InflateWork *work;
 	unsigned long outPos = 0;
 	int bfinal;
 
@@ -414,6 +425,9 @@ inflate(const unsigned char *src, unsigned long srcLen,
 	if ((src[0] & 0x0F) != 8) return 0;         /* CM must be 8 */
 	if ((src[0] * 256 + src[1]) % 31 != 0) return 0;
 	if (src[1] & 0x20) return 0;                 /* FDICT not supported */
+
+	work = (InflateWork *)plugin_alloc(sizeof(InflateWork));
+	if (!work) return 0;
 
 	br_init(&br, src + 2, srcLen - 6);  /* skip zlib header, exclude trailer */
 
@@ -426,12 +440,17 @@ inflate(const unsigned char *src, unsigned long srcLen,
 
 		switch (btype) {
 		case 0: err = inflate_stored(&br, out, outLen, &outPos); break;
-		case 1: err = inflate_fixed(&br, out, outLen, &outPos); break;
-		case 2: err = inflate_dynamic(&br, out, outLen, &outPos); break;
-		default: return 0;
+		case 1: err = inflate_fixed(&br, work, out, outLen, &outPos); break;
+		case 2: err = inflate_dynamic(&br, work, out, outLen, &outPos); break;
+		default: plugin_free(work); return 0;
 		}
-		if (err != INF_OK) return 0;
+		if (err != INF_OK) {
+			plugin_free(work);
+			return 0;
+		}
 	} while (!bfinal);
+
+	plugin_free(work);
 
 	/* verify Adler-32 */
 	{
@@ -468,22 +487,19 @@ static int
 read_chunk_header(BPTR fh, ChunkHeader *ch)
 {
 	if (!file_read_be32(fh, &ch->length)) return 0;
+	if (ch->length > 0x7FFFFFFFUL) return 0;  /* PNG spec chunk max */
 	if (!file_read(fh, ch->type, 4)) return 0;
 	return 1;
 }
 
-/* Read chunk data + CRC, validate CRC */
+/* Read chunk data + CRC, validate CRC.
+ * A zero-length chunk returns a valid plugin_alloc(0) block. */
 static unsigned char *
 read_chunk_data(BPTR fh, ChunkHeader *ch)
 {
 	unsigned char *data;
 	unsigned char crcbuf[4];
 	unsigned long crc;
-
-	if (ch->length == 0) {
-		if (!file_read(fh, crcbuf, 4)) return 0;
-		return (unsigned char *)1;  /* non-null sentinel for empty data */
-	}
 
 	data = (unsigned char *)plugin_alloc(ch->length);
 	if (!data) return 0;
@@ -535,6 +551,8 @@ typedef struct {
 static int
 parse_ihdr(const unsigned char *data, unsigned long len, PNGInfo *info)
 {
+	unsigned long bitsPerPixel, stride;
+
 	if (len < 13) return 0;
 
 	info->width     = (int)get_be32(data);
@@ -544,6 +562,8 @@ parse_ihdr(const unsigned char *data, unsigned long len, PNGInfo *info)
 	info->interlace = data[12];
 
 	if (info->width <= 0 || info->height <= 0) return 0;
+	/* cap dimensions so the size math below cannot overflow */
+	if (info->width > 0x00FFFFFF || info->height > 0x00FFFFFF) return 0;
 	if (data[10] != 0 || data[11] != 0) return 0;  /* compression/filter */
 	if (info->interlace != 0) return 0;              /* no Adam7 support */
 
@@ -556,12 +576,34 @@ parse_ihdr(const unsigned char *data, unsigned long len, PNGInfo *info)
 	default: return 0;
 	}
 
-	/* compute bytes per pixel and stride */
-	{
-		int bitsPerPixel = info->bitDepth * info->srcChannels;
-		info->srcBpp = (bitsPerPixel + 7) / 8;
-		info->srcStride = (info->width * bitsPerPixel + 7) / 8;
+	/* bit depths allowed per color type (PNG spec) */
+	switch (info->colorType) {
+	case 0:
+		if (info->bitDepth != 1 && info->bitDepth != 2 &&
+		    info->bitDepth != 4 && info->bitDepth != 8 &&
+		    info->bitDepth != 16) return 0;
+		break;
+	case 3:
+		if (info->bitDepth != 1 && info->bitDepth != 2 &&
+		    info->bitDepth != 4 && info->bitDepth != 8) return 0;
+		break;
+	default:  /* color types 2, 4 and 6 */
+		if (info->bitDepth != 8 && info->bitDepth != 16) return 0;
+		break;
 	}
+
+	/* compute bytes per pixel and stride in unsigned long so wide
+	   images cannot overflow the signed multiply */
+	bitsPerPixel = (unsigned long)info->bitDepth * info->srcChannels;
+	stride = ((unsigned long)info->width * bitsPerPixel + 7) / 8;
+
+	/* reject sizes whose raw image or RGB row buffers would wrap */
+	if (stride > 0x7FFFFFFFUL) return 0;
+	if (1 + stride > 0x7FFFFFFFUL / (unsigned long)info->height) return 0;
+	if ((unsigned long)info->width * 3 > 0x7FFFFFFFUL) return 0;
+
+	info->srcBpp    = (int)((bitsPerPixel + 7) / 8);
+	info->srcStride = (int)stride;
 
 	return 1;
 }
@@ -782,7 +824,7 @@ Activate(
 
 	/* --- open file and validate PNG signature --- */
 
-	fh = Open((STRPTR)local->filename, MODE_OLDFILE);
+	fh = quiet_open(local->filename, MODE_OLDFILE);
 	if (!fh) {
 		local->result = IPSTAT_BADFILE;
 		return AFUNC_OK;
@@ -818,11 +860,24 @@ Activate(
 			continue;
 		}
 
-		/* PLTE */
+		/* PLTE -- 3 bytes per entry, at most 256 entries; only one */
 		if (memcmp(ch.type, "PLTE", 4) == 0) {
+			if (palette) goto bad_file;  /* duplicate PLTE */
 			data = read_chunk_data(fh, &ch);
 			if (!data) goto bad_file;
-			palette = data;  /* keep — freed at end */
+			if (ch.length == 0 || (ch.length % 3) != 0 ||
+			    ch.length > 768) {
+				plugin_free(data);
+				goto bad_file;
+			}
+			/* zeroed 768-byte table: missing entries read as black */
+			palette = (unsigned char *)plugin_alloc(768);
+			if (!palette) {
+				plugin_free(data);
+				goto fail;
+			}
+			memcpy(palette, data, ch.length);
+			plugin_free(data);
 			continue;
 		}
 
@@ -830,6 +885,13 @@ Activate(
 		if (memcmp(ch.type, "IDAT", 4) == 0) {
 			data = read_chunk_data(fh, &ch);
 			if (!data) goto bad_file;
+
+			/* keep idatSize + ch.length and the doubling below in
+			   32-bit range (read_chunk_header caps ch.length) */
+			if (ch.length > 0x3FFFFFFFUL - idatSize) {
+				plugin_free(data);
+				goto fail;
+			}
 
 			/* grow IDAT buffer if needed */
 			if (idatSize + ch.length > idatAlloc) {

@@ -18,6 +18,7 @@
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
@@ -115,6 +116,22 @@ int_to_str(int val, char *buf, int buflen)
 	buf[len] = '\0';
 }
 
+static void
+str_append_bounded(char *dst, int dstMax, const char *src)
+{
+	int len;
+
+	if (!dst || !src || dstMax < 1)
+		return;
+
+	len = strlen(dst);
+	if (len >= dstMax - 1)
+		return;
+
+	strncat(dst, src, dstMax - 1 - len);
+	dst[dstMax - 1] = '\0';
+}
+
 /* ----------------------------------------------------------------
  * Types
  * ---------------------------------------------------------------- */
@@ -129,6 +146,10 @@ typedef struct {
 	char        baseDir[MAX_PATH];
 	char        baseName[MAX_NAME];
 	char        origPath[MAX_PATH];  /* base object file (no _N suffix) */
+	char        loadPath[MAX_PATH];
+	char        scanName[MAX_NAME];
+	char        messageBuf[128];
+	char        numberBuf[12];
 	FrameEntry *entries;
 	int         numEntries;
 	int         capacity;
@@ -162,12 +183,10 @@ split_path(const char *fullpath, char *dir, int dirmax,
 		if (len >= dirmax) len = dirmax - 1;
 		memcpy(dir, fullpath, len);
 		dir[len] = '\0';
-		strncpy(file, lastSep + 1, filemax - 1);
-		file[filemax - 1] = '\0';
+		spi_copy_string(file, filemax, lastSep + 1);
 	} else {
 		dir[0] = '\0';
-		strncpy(file, fullpath, filemax - 1);
-		file[filemax - 1] = '\0';
+		spi_copy_string(file, filemax, fullpath);
 	}
 }
 
@@ -187,8 +206,7 @@ extract_base_name(const char *filename, char *base, int basemax)
 		memcpy(base, filename, len);
 		base[len] = '\0';
 	} else {
-		strncpy(base, filename, basemax - 1);
-		base[basemax - 1] = '\0';
+		spi_copy_string(base, basemax, filename);
 	}
 
 	for (p = base; *p; p++) {
@@ -322,9 +340,9 @@ do_scan(ObjSwapInst *inst)
 		return;
 
 	if (inst->baseDir[0])
-		lock = Lock((STRPTR)inst->baseDir, ACCESS_READ);
+		lock = quiet_lock(inst->baseDir, ACCESS_READ);
 	else
-		lock = Lock((STRPTR)"", ACCESS_READ);
+		lock = quiet_lock("", ACCESS_READ);
 
 	if (!lock)
 		return;
@@ -366,6 +384,19 @@ do_scan(ObjSwapInst *inst)
 		if (++fileCount > 10000)
 			break;
 
+		/* Do NOT process .info files!
+		 * Certain AmigaOS/Workbench flavors like to
+		 * make these for every file whenever the FS
+		 * is accessed. They will be read by the obj
+		 * scanner, which will crash the plugin.
+		*/
+
+		{
+			const char *ext = strrchr(fname, '.');
+			if (ext && ci_strncmp(ext, ".info", 6) == 0)
+				continue;
+		}
+
 		/*
 		 * Check if this file IS the base object (matches
 		 * baseName exactly, with optional extension, no _N).
@@ -377,26 +408,13 @@ do_scan(ObjSwapInst *inst)
 		{
 			dest = inst->origPath;
 			if (dirLen > 0) {
-				strncpy(dest, inst->baseDir, MAX_PATH - 1);
-				dest[MAX_PATH - 1] = '\0';
+				spi_copy_string(dest, MAX_PATH, inst->baseDir);
 				strncat(dest, fname,
 				        MAX_PATH - 1 - dirLen);
 			} else {
-				strncpy(dest, fname, MAX_PATH - 1);
-				dest[MAX_PATH - 1] = '\0';
+				spi_copy_string(dest, MAX_PATH, fname);
 			}
 		}
-
-		/* Do NOT process .info files!
-		 * Certain AmigaOS/Workbench flavors like to
-		 * make these for every file whenever the FS
-		 * is accessed. They will be read by the obj
-		 * scanner, which will crash the plugin.
-		*/
-
-		char * ext = strrchr(fname, '.');
-		if(strcmp(ext, ".info") == 0)
-			continue;
 
 		frame = parse_frame_number(
 			(const char *)fib->fib_FileName,
@@ -429,16 +447,13 @@ do_scan(ObjSwapInst *inst)
 		/* Build full path directly into entry (no stack buffer) */
 		dest = inst->entries[inst->numEntries].filename;
 		if (dirLen > 0) {
-			strncpy(dest, inst->baseDir, MAX_PATH - 1);
-			dest[MAX_PATH - 1] = '\0';
+			spi_copy_string(dest, MAX_PATH, inst->baseDir);
 			strncat(dest,
 			        (const char *)fib->fib_FileName,
 			        MAX_PATH - 1 - dirLen);
 		} else {
-			strncpy(dest,
-			        (const char *)fib->fib_FileName,
-			        MAX_PATH - 1);
-			dest[MAX_PATH - 1] = '\0';
+			spi_copy_string(dest, MAX_PATH,
+			                (const char *)fib->fib_FileName);
 		}
 
 		inst->entries[inst->numEntries].frame = frame;
@@ -457,14 +472,11 @@ do_scan(ObjSwapInst *inst)
 static void
 scan_from_path(ObjSwapInst *inst, const char *objPath)
 {
-	char filename[MAX_NAME];
-
-	strncpy(inst->basePath, objPath, MAX_PATH - 1);
-	inst->basePath[MAX_PATH - 1] = '\0';
+	spi_copy_string(inst->basePath, MAX_PATH, objPath);
 
 	split_path(objPath, inst->baseDir, MAX_PATH,
-	           filename, MAX_NAME);
-	extract_base_name(filename, inst->baseName, MAX_NAME);
+	           inst->scanName, MAX_NAME);
+	extract_base_name(inst->scanName, inst->baseName, MAX_NAME);
 
 	do_scan(inst);
 }
@@ -528,12 +540,12 @@ Copy(ObjSwapInst *from, ObjSwapInst *to)
 XCALL_(static LWError)
 Load(ObjSwapInst *inst, const LWLoadState *ls)
 {
-	char buf[MAX_PATH];
-
 	XCALL_INIT;
 
-	if (spi_read_string_record(ls, buf, sizeof(buf)) > 0 && buf[0])
-		scan_from_path(inst, buf);
+	if (spi_read_string_record(ls, inst->loadPath,
+	                           sizeof(inst->loadPath)) > 0
+	    && inst->loadPath[0])
+		scan_from_path(inst, inst->loadPath);
 
 	return 0;
 }
@@ -603,10 +615,8 @@ ui_entryName(void *data, int idx)
 	strcat(ui_buf, numBuf);
 	strcat(ui_buf, ": ");
 	len = strlen(ui_buf);
-	strncpy(ui_buf + len,
-	        ui_inst->entries[idx].filename,
-	        sizeof(ui_buf) - len - 1);
-	ui_buf[sizeof(ui_buf) - 1] = '\0';
+	spi_copy_string(ui_buf + len, (int)(sizeof(ui_buf) - len),
+	                ui_inst->entries[idx].filename);
 	return ui_buf;
 }
 
@@ -620,9 +630,9 @@ Interface(
 	LWPanelFuncs *panl;
 	LWPanelID     pan;
 	LWControl    *listCtl, *infoCtl;
-	char          infoBuf[128];
-	char          numBuf[12];
 	const char   *infoLines[3];
+	char         *infoBuf = inst->messageBuf;
+	char         *numBuf = inst->numberBuf;
 
 	XCALL_INIT;
 	if (version != 1)
@@ -646,17 +656,22 @@ Interface(
 			goto fallback;
 
 		if (inst->baseName[0]) {
-			strcpy(infoBuf, "Base Object: ");
-			strcat(infoBuf, inst->baseName);
-			strcat(infoBuf, "  |  Found: ");
+			spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+			                "Base Object: ");
+			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+			                   inst->baseName);
+			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+			                   "  |  Found: ");
 			int_to_str(inst->numEntries, numBuf,
-			           sizeof(numBuf));
-			strcat(infoBuf, numBuf);
-			strcat(infoBuf, " files");
+			           sizeof(inst->numberBuf));
+			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+			                   numBuf);
+			str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+			                   " files");
 		} else {
-			strcpy(infoBuf,
-			       "No object scanned yet. "
-			       "Preview a frame first.");
+			spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+			                "No object scanned yet. "
+			                "Preview a frame first.");
 		}
 
 		infoLines[0] = infoBuf;
@@ -685,15 +700,20 @@ fallback:
 		return AFUNC_BADGLOBAL;
 
 	if (inst->numEntries > 0) {
-		strcpy(infoBuf, "Found ");
-		int_to_str(inst->numEntries, numBuf, sizeof(numBuf));
-		strcat(infoBuf, numBuf);
-		strcat(infoBuf, " replacement(s) for ");
-		strcat(infoBuf, inst->baseName);
+		spi_copy_string(infoBuf, sizeof(inst->messageBuf), "Found ");
+		int_to_str(inst->numEntries, numBuf,
+		           sizeof(inst->numberBuf));
+		str_append_bounded(infoBuf, sizeof(inst->messageBuf), numBuf);
+		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+		                   " replacement(s) for ");
+		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+		                   inst->baseName);
 		(*msg->info)("ObjSwap", infoBuf);
 	} else if (inst->basePath[0]) {
-		strcpy(infoBuf, "No replacements for ");
-		strcat(infoBuf, inst->baseName);
+		spi_copy_string(infoBuf, sizeof(inst->messageBuf),
+		                "No replacements for ");
+		str_append_bounded(infoBuf, sizeof(inst->messageBuf),
+		                   inst->baseName);
 		(*msg->info)("ObjSwap", infoBuf);
 	} else {
 		(*msg->info)("ObjSwap",
