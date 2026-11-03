@@ -11,14 +11,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: sacredbanana/amiga-compiler:m68k-amigaos
+      image: amigadev/crosstools:m68k-amigaos-gcc10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show compiler version
+        run: m68k-amigaos-gcc --version
+
       - name: Build plugins and release package
-        run: make -j4 package
+        run: make -j4 package EXTRA_CFLAGS=-Werror
 
       - name: List release package
         run: |

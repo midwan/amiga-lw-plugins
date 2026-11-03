@@ -2,10 +2,14 @@
 
 ## Toolchain
 
-- **Docker image**: `sacredbanana/amiga-compiler:m68k-amigaos`
-- **Compiler**: `m68k-amigaos-gcc` 6.5.0b (GCC cross-compiler for m68k AmigaOS)
+- **Docker image**: `amigadev/crosstools:m68k-amigaos-gcc10`. The tag name is stale: it
+  carries AmigaDev GCC 16 builds and moves with their release candidates, so check
+  `m68k-amigaos-gcc --version` before comparing binaries
+- **Compiler**: `m68k-amigaos-gcc` 16.2.1b (AmigaDev 16.2-rc22 on 2026-11-03). GCC 16
+  defaults to C23, `-fno-common` and LRA (`-mlra` is already on)
 - **Build wrapper**: `./build.sh` runs `make` inside Docker, mounting the project at `/work`
-- **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall` (`CPUFLAGS` defaults to `-m68020`, soft-float)
+- **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall $(EXTRA_CFLAGS)` (`CPUFLAGS` defaults to `-m68020`, soft-float).
+  CI passes `EXTRA_CFLAGS=-Werror`, so every build must stay warning-free
 - **Key linker flags**: `-noixemul -nostartfiles $(CPUFLAGS)`
 - **Required link libraries**: `-lm -lgcc` (math and GCC runtime)
 - **FPU variants**: `make fpu` (or `020fpu`/`040fpu`/`060fpu`) builds into `build-<variant>/` with its own `sdklib/`
@@ -18,9 +22,12 @@
   value is not used. No plugin currently consumes one (`pbr.c` ignores the `rayTrace` result).
   Verify the LightWave host convention before using a `double` return from `rayTrace`,
   `rayCast`, `rayShade`, `LWCameraInfo`, `LWFogInfo`, etc. in an FPU build.
-- The libnix driver links all three variants against `libm020/libm881`. Its `sin`/`sqrt` call
-  `mathieeedoubtrans.library` and return in `fp0`, so `slib4.c` must still open the math
-  libraries in FPU builds (the `motion` plugin needs this).
+- The libnix driver links all three variants against `libm020/libm881`. In the GCC 16
+  image its `sin`/`cos` are inline `fsin`/`fcos` (68881/68882 only; 040/060 trap them to
+  `68040.library`/`68060.library`), while `pow` and friends call `mathieeedoubtrans.library`
+  and return in `fp0`. Use `sdk/include/trig_approx.h` (`sin_approx`/`cos_approx`) instead of
+  libm `sin`/`cos` (Motion, Instancer). `slib4.c` must still open the math libraries in FPU
+  builds (`pow` in NormalMap and PostFilter).
 - `020fpu` emits `fmovecr`/`fintrz` (68881/68882 only; trapped and emulated on 040/060).
   `040fpu`/`060fpu` emit `fd*`/`fs*` (040/060 FPU only). `060fpu` may emit `fintrz`.
 - FPU code saves `fp2`–`fp7` (12 bytes each) in function prologues; keep this in mind for the
@@ -30,10 +37,10 @@
 
 | Path | Contents |
 |---|---|
-| `/opt/amiga/bin/` | Cross-tools (`m68k-amigaos-gcc`, `ar`, `as`, `ld`, etc.) |
-| `/opt/amiga/m68k-amigaos/ndk-include/` | AmigaOS NDK headers (`exec/`, `dos/`, `intuition/`, etc.) |
-| `/opt/amiga/m68k-amigaos/lib/` | System libraries (`libamiga.a`, `libc.a`, `libm.a`) |
-| `/opt/amiga/m68k-amigaos/libnix/` | libnix C runtime (standalone, no ixemul.library) |
+| `/opt/m68k-amigaos/bin/` | Cross-tools (`m68k-amigaos-gcc`, `ar`, `as`, `ld`, etc.), on `PATH` |
+| `/opt/m68k-amigaos/m68k-amigaos/ndk-include/` | AmigaOS NDK headers (`exec/`, `dos/`, `intuition/`, etc.) |
+| `/opt/m68k-amigaos/m68k-amigaos/lib/` | System libraries (`libamiga.a`, `libc.a`, `libm.a`) |
+| `/opt/m68k-amigaos/m68k-amigaos/libnix/` | libnix C runtime (standalone, no ixemul.library) |
 
 ### GCC compatibility notes
 
@@ -41,6 +48,12 @@
 - `XCALL_(t)` and `XCALL_INIT` are defined as no-ops for GCC in `plug.h`
 - SAS/C object files (`.o`, `.lib`) are NOT link-compatible with GCC — everything must be rebuilt from source
 - `stubs.c` provides a dummy `exit()` because libnix references it but plugins never call it
+- Copy strings into fixed buffers with `spi_copy_string()` (`safe_pluginio.h`), not
+  `strncpy` + manual terminator: GCC 16's `-Wstringop-truncation` flags that idiom
+  once the helper is inlined
+- Lock/Open user or scene paths with `quiet_lock()`/`quiet_open()` (`sdk/include/quiet_dos.h`):
+  they set `pr_WindowPtr` to -1 so a missing volume fails instead of opening a DOS
+  "Please insert volume" requester that blocks Layout and ScreamerNet
 
 ### CRITICAL: No libnix runtime functions
 
@@ -444,30 +457,31 @@ Located at: `/Users/midwan/Library/CloudStorage/OneDrive-Personal/Projects/Light
 
 ## PBR Shader - Feature Reference
 
-### Save/Load field order (20 fields total)
-ior*1000, reflPower, affectMirror, affectTrans, affectDiffuse, diffPower,
-roughEnabled, roughAmount, aoEnabled, aoSamples, aoRadius, aoStrength,
-metallic, affectSpecular, blurReflEnabled, blurReflSamples, blurReflAmount,
-envEnabled, envSamples, envStrength
+### Save/Load format
+Saves write version 2 (scene line and object data): version, ior*1000,
+roughEnabled, roughAmount, aoEnabled, aoStrength, metallic, blurReflEnabled,
+blurReflSamples, blurReflAmount, envEnabled, envStrength.
 
-Note: Fresnel controls (affectMirror, affectTrans, affectDiffuse, reflPower,
-diffPower) preserved in save/load for backward compat but removed from PBR UI.
-Use standalone Fresnel plugin for angle-dependent effects.
-Metallic is 0-100 (old scenes with metallic=1 auto-convert to 100 on load).
+Version 1 data (scene line starting with ior*1000, or object version 1) still
+loads; its 20 fields are: ior*1000, reflPower, affectMirror, affectTrans,
+affectDiffuse, diffPower, roughEnabled, roughAmount, aoEnabled, aoSamples,
+aoRadius, aoStrength, metallic, affectSpecular, blurReflEnabled,
+blurReflSamples, blurReflAmount, envEnabled, envSamples, envStrength. The
+Fresnel, aoSamples/aoRadius and envSamples fields are skipped; use the
+standalone Fresnel plugin for angle-dependent effects. Metallic is 0-100 (old
+scenes with metallic=1 auto-convert to 100 on load). `clamp_settings()`
+applies the panel limits after every load.
 
-### Blurred Reflections (implemented)
+### Blurred Reflections
 - Reflection direction: R = V - 2*dot(V,N)*N where V = normalize(wPos - raySource)
-- Casts N rays (4/8/16) via sa->rayTrace() in a cone around R
+- Casts N rays (2/4/8, capped at 8) via sa->rayTrace() in a cone around R, only for
+  primary evaluations (`blur_trace_depth` guard; rayTrace re-enters the shader)
 - Cone spread: blurReflAmount / 200.0 (independent of roughness), perturbed via hash3d with per-sample seeds
 - Averages returned colors, blends into sa->color weighted by sa->mirror
 - Sets sa->mirror = 0 to prevent LW doubling the reflection
-- Instance fields: blurReflEnabled (int), blurReflSamples (int 4/8/16), blurReflAmount (int 0-100)
 - Flags: LWSHF_COLOR | LWSHF_MIRROR | LWSHF_RAYTRACE
 
-### Environment Sampling (implemented)
-- Casts N rays (4/8/16) via sa->rayTrace() in hemisphere around normal using hemi_dirs[]
-- Flips rays facing away from normal, cosine-weighted by dot(dir, normal)
-- Averages colors, adds to sa->color scaled by envStrength/100
-- Boosts sa->luminous by envStr * 0.3 for self-illumination
-- Instance fields: envEnabled (int), envSamples (int 4/8/16), envStrength (int 0-100)
-- Flags: LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_RAYTRACE
+### Environment Light
+- No rays: a normal-based ambient boost, (0.3 + 0.7 * max(N.y, 0)) * envStrength/100
+- Adds half of that to sa->luminous and scales sa->color by 1 + 0.3 * factor, both clamped to 1
+- Flags: LWSHF_COLOR | LWSHF_LUMINOUS
