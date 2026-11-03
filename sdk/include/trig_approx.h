@@ -13,8 +13,10 @@
  *
  * Taylor series after range reduction to [-pi/2, pi/2];
  * sin(x) = x*(1 + x2*(c1 + x2*(...))), cos(x) = 1 + x2*(c1 + x2*(...)).
- * Max error below 1e-9 on that range. Angles beyond +-1e6 radians return
- * the value at 0.
+ * Max error below 1e-9 on that range. Range reduction subtracts whole turns
+ * counted in a long long, so the result degrades only as the double input
+ * loses precision; beyond 2^52 turns, where a double holds no fraction of a
+ * turn, it returns the value at 0.
  */
 
 #ifdef __GNUC__
@@ -29,12 +31,13 @@ reduce_angle(double x)
 {
 	double two_pi = 6.283185307179586;
 	double pi = 3.141592653589793;
-	int turns;
+	double turns = x / two_pi;
+	long long whole;
 
-	if (x > 1000000.0 || x < -1000000.0)
+	if (turns > 4503599627370496.0 || turns < -4503599627370496.0)
 		return 0.0;
-	turns = (int)(x / two_pi);
-	x = x - (double)turns * two_pi;
+	whole = (long long)turns;
+	x = x - (double)whole * two_pi;
 	if (x > pi)
 		x = x - two_pi;
 	else if (x < -pi)

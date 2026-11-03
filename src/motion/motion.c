@@ -198,6 +198,9 @@ typedef struct {
 
 	/* Noise octaves for wiggle (1-4) */
 	int       octaves;
+
+	/* Scene line for Load/Save; kept off the callback stack */
+	char      lineBuf[MOTION_LINE_MAX];
 } MotionInst;
 
 /* ----------------------------------------------------------------
@@ -286,13 +289,13 @@ clamp_settings(MotionInst *inst)
 XCALL_(static LWError)
 Load(MotionInst *inst, const LWLoadState *ls)
 {
-	char buf[MOTION_LINE_MAX];
+	char *buf = inst->lineBuf;
 	const char *p;
 	int v;
 	XCALL_INIT;
 
 	if (ls->ioMode == LWIO_SCENE) {
-		if (!spi_read_line(ls, buf, sizeof(buf)) || !buf[0])
+		if (!spi_read_line(ls, buf, MOTION_LINE_MAX) || !buf[0])
 			return 0;
 		p = buf;
 		p = parse_int(p, &v);
@@ -336,7 +339,7 @@ Load(MotionInst *inst, const LWLoadState *ls)
 XCALL_(static LWError)
 Save(MotionInst *inst, const LWSaveState *ss)
 {
-	char buf[MOTION_LINE_MAX];
+	char *buf = inst->lineBuf;
 	int pos = 0;
 	XCALL_INIT;
 
