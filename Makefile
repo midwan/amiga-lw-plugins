@@ -1,6 +1,6 @@
 #
 # Makefile for LightWave plugins using m68k-amigaos-gcc
-# Run inside Docker: sacredbanana/amiga-compiler:m68k-amigaos
+# Run inside Docker: amigadev/crosstools:m68k-amigaos-gcc10 (GCC 16)
 #
 
 .DEFAULT_GOAL := all
@@ -18,7 +18,9 @@ CPUFLAGS = -m68020
 BUILD    = build
 PVER     = $(shell cat VERSION)
 
-CFLAGS   = -noixemul $(CPUFLAGS) -O2 -Wall -I$(SDK_INC) -DPLUGIN_VERSION=\"$(PVER)\"
+# EXTRA_CFLAGS: added to every compile, e.g. EXTRA_CFLAGS=-Werror (CI).
+EXTRA_CFLAGS ?=
+CFLAGS   = -noixemul $(CPUFLAGS) -O2 -Wall $(EXTRA_CFLAGS) -I$(SDK_INC) -DPLUGIN_VERSION=\"$(PVER)\"
 LDFLAGS  = -noixemul -nostartfiles $(CPUFLAGS)
 LIBS     = $(SDK_LIB)/server.a -lm -lgcc
 

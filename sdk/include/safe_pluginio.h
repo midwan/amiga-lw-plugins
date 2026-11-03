@@ -10,6 +10,27 @@
 #define SPI_UNUSED
 #endif
 
+/*
+ * Copies at most dstMax - 1 characters of src and always terminates dst.
+ * Unlike strncpy, it does not zero-fill the rest of dst.
+ */
+static void
+SPI_UNUSED
+spi_copy_string(char *dst, int dstMax, const char *src)
+{
+	int n = 0;
+
+	if (!dst || dstMax < 1)
+		return;
+	if (src) {
+		while (n < dstMax - 1 && src[n]) {
+			dst[n] = src[n];
+			n++;
+		}
+	}
+	dst[n] = '\0';
+}
+
 static int
 SPI_UNUSED
 spi_read_line(const LWLoadState *ls, char *buf, int buflen)

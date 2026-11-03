@@ -214,10 +214,8 @@ static void refresh_name(MapSlot *slot)
 	il = (LWImageList *)(*gfunc)("LW Image List", GFUSE_TRANSIENT);
 	if (!il) return;
 	n = (*il->name)(slot->imageID);
-	if (n) {
-		strncpy(slot->imageName, n, NMAP_MAX_NAME - 1);
-		slot->imageName[NMAP_MAX_NAME - 1] = '\0';
-	}
+	if (n)
+		spi_copy_string(slot->imageName, NMAP_MAX_NAME, n);
 }
 
 static void load_slot(MapSlot *slot, LWImageList *il)
@@ -339,8 +337,7 @@ XCALL_(static LWError) Load(NormalMapInst *inst, const LWLoadState *ls)
 			parse_int(p, &inst->specularAmount);
 			for (i = 0; i < NMAP_SLOT_COUNT; i++) {
 				if (spi_read_line(ls, buf, sizeof(buf)) && buf[0]) {
-					strncpy(inst->map[i].imageName, buf, NMAP_MAX_NAME - 1);
-					inst->map[i].imageName[NMAP_MAX_NAME - 1] = '\0';
+					spi_copy_string(inst->map[i].imageName, NMAP_MAX_NAME, buf);
 				}
 			}
 		} else return 0;
@@ -769,7 +766,7 @@ XCALL_(static const char *) DescLn(NormalMapInst *inst)
 	for (i = 0; i < NMAP_SLOT_COUNT; i++)
 		if (inst->map[i].imageName[0]) break;
 	if (i == NMAP_SLOT_COUNT) return "(no image)";
-	strncpy(descBuf, inst->map[i].imageName, 40); descBuf[40] = '\0';
+	spi_copy_string(descBuf, 41, inst->map[i].imageName);
 	if (i == NMAP_SLOT_NORMAL) {
 		int n = (int)strlen(descBuf);
 		descBuf[n++] = ' ';
@@ -788,8 +785,7 @@ static void select_popup_slot(NormalMapInst *inst, int slot, int index, int coun
 {
 	if (index > 0 && index <= count) {
 		inst->map[slot].imageID = ids[index - 1];
-		strncpy(inst->map[slot].imageName, names[index], NMAP_MAX_NAME - 1);
-		inst->map[slot].imageName[NMAP_MAX_NAME - 1] = '\0';
+		spi_copy_string(inst->map[slot].imageName, NMAP_MAX_NAME, names[index]);
 	} else { inst->map[slot].imageID = 0; inst->map[slot].imageName[0] = '\0'; }
 }
 

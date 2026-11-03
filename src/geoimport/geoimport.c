@@ -17,6 +17,7 @@
 
 #include <splug.h>
 #include <lwbase.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
@@ -797,7 +798,7 @@ Activate(
 		return AFUNC_OK;
 	}
 
-	fh = Open((STRPTR)obj->filename, MODE_OLDFILE);
+	fh = quiet_open(obj->filename, MODE_OLDFILE);
 	if (!fh) {
 		obj->result = OBJSTAT_BADFILE;
 		return AFUNC_OK;

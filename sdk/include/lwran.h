@@ -120,6 +120,7 @@ typedef struct st_ImageFilterHandler {
 	void            (*changeID) (LWInstance,
 				     const LWItemID *);
 } ImageFilterHandler;
+struct st_ShaderAccess;
 typedef struct st_PixelAccess {
 	double            sx, sy;
 	void            (*bufVal) (int type, int num, BufferValue *);

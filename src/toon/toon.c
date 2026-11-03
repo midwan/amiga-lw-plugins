@@ -187,6 +187,26 @@ Copy(ToonInst *from, ToonInst *to)
 	return 0;
 }
 
+/* Same limits as the panel; scene or object data may be hand-edited. */
+static void
+clamp_settings(ToonInst *inst)
+{
+	if (inst->bands < 2) inst->bands = 2;
+	if (inst->bands > 8) inst->bands = 8;
+	if (inst->edgeThreshold < 1) inst->edgeThreshold = 1;
+	if (inst->edgeThreshold > 100) inst->edgeThreshold = 100;
+	if (inst->colorEdgeThresh < 1) inst->colorEdgeThresh = 1;
+	if (inst->colorEdgeThresh > 100) inst->colorEdgeThresh = 100;
+	if (inst->outlineWidth < 1) inst->outlineWidth = 1;
+	if (inst->outlineWidth > 3) inst->outlineWidth = 3;
+	if (inst->outlineR < 0) inst->outlineR = 0;
+	if (inst->outlineR > 255) inst->outlineR = 255;
+	if (inst->outlineG < 0) inst->outlineG = 0;
+	if (inst->outlineG > 255) inst->outlineG = 255;
+	if (inst->outlineB < 0) inst->outlineB = 0;
+	if (inst->outlineB > 255) inst->outlineB = 255;
+}
+
 XCALL_(static LWError)
 Load(ToonInst *inst, const LWLoadState *ls)
 {
@@ -224,10 +244,7 @@ Load(ToonInst *inst, const LWLoadState *ls)
 		if (!spi_read_i32be(ls, &inst->enableOutline)) return 0;
 	}
 
-	if (inst->bands < 2) inst->bands = 2;
-	if (inst->bands > 8) inst->bands = 8;
-	if (inst->edgeThreshold < 1) inst->edgeThreshold = 1;
-	if (inst->edgeThreshold > 100) inst->edgeThreshold = 100;
+	clamp_settings(inst);
 
 	return 0;
 }
@@ -541,21 +558,7 @@ Interface(
 			GET_INT(ctlOutG, inst->outlineG);
 			GET_INT(ctlOutB, inst->outlineB);
 
-			/* Clamp */
-			if (inst->bands < 2) inst->bands = 2;
-			if (inst->bands > 8) inst->bands = 8;
-			if (inst->edgeThreshold < 1) inst->edgeThreshold = 1;
-			if (inst->edgeThreshold > 100) inst->edgeThreshold = 100;
-			if (inst->colorEdgeThresh < 1) inst->colorEdgeThresh = 1;
-			if (inst->colorEdgeThresh > 100) inst->colorEdgeThresh = 100;
-			if (inst->outlineWidth < 1) inst->outlineWidth = 1;
-			if (inst->outlineWidth > 3) inst->outlineWidth = 3;
-			if (inst->outlineR < 0) inst->outlineR = 0;
-			if (inst->outlineR > 255) inst->outlineR = 255;
-			if (inst->outlineG < 0) inst->outlineG = 0;
-			if (inst->outlineG > 255) inst->outlineG = 255;
-			if (inst->outlineB < 0) inst->outlineB = 0;
-			if (inst->outlineB > 255) inst->outlineB = 255;
+			clamp_settings(inst);
 		}
 
 		PAN_KILL(panl, pan);

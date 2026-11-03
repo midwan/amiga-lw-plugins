@@ -11,6 +11,7 @@
 
 #include <splug.h>
 #include <image.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
@@ -642,7 +643,7 @@ Activate(
 
 	memset(&st, 0, sizeof(st));
 
-	st.fh = Open((STRPTR)local->filename, MODE_NEWFILE);
+	st.fh = quiet_open(local->filename, MODE_NEWFILE);
 	if (!st.fh) {
 		local->result = IPSTAT_FAILED;
 		return AFUNC_OK;

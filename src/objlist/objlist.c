@@ -10,13 +10,13 @@
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
 #include <proto/dos.h>
 #include <proto/exec.h>
 #include <dos/dos.h>
-#include <dos/dosextens.h>
 #include <exec/memory.h>
 
 extern struct DosLibrary *DOSBase;
@@ -112,8 +112,7 @@ int_to_str(int value, char *buf, int bufLen)
 static void
 copy_path(char *dest, const char *src)
 {
-	strncpy(dest, src, MAX_PATH - 1);
-	dest[MAX_PATH - 1] = '\0';
+	spi_copy_string(dest, MAX_PATH, src);
 }
 
 static void
@@ -199,7 +198,7 @@ parse_frame(const char *line, int *frame)
 	if (*line < '0' || *line > '9') return 0;
 	value = 0;
 	while (*line >= '0' && *line <= '9') {
-		if (value > 214748364) return 0;
+		if (value > (2147483647 - (*line - '0')) / 10) return 0;
 		value = value * 10 + (*line - '0');
 		line++;
 	}
@@ -285,30 +284,10 @@ sort_entries(FrameEntry *entries, int count)
 	}
 }
 
-static BPTR
-quiet_lock(const char *path)
-{
-	struct Process *process;
-	APTR oldWindow;
-	BPTR lock;
-
-	process = (struct Process *)FindTask(0);
-	if (process) {
-		oldWindow = process->pr_WindowPtr;
-		process->pr_WindowPtr = (APTR)-1;
-	}
-	lock = Lock((STRPTR)path, ACCESS_READ);
-	if (process) process->pr_WindowPtr = oldWindow;
-	return lock;
-}
-
-
 static void
 parse_list(ObjListInst *inst)
 {
 	BPTR file;
-	struct Process *process;
-	APTR oldWindow;
 	char *line;
 	char ch;
 	char *text;
@@ -320,13 +299,7 @@ parse_list(ObjListInst *inst)
 	inst->listReadable = 0;
 	if (!DOSBase || !inst->listPath[0]) return;
 
-	process = (struct Process *)FindTask(0);
-	if (process) {
-		oldWindow = process->pr_WindowPtr;
-		process->pr_WindowPtr = (APTR)-1;
-	}
-	file = Open((STRPTR)inst->listPath, MODE_OLDFILE);
-	if (process) process->pr_WindowPtr = oldWindow;
+	file = quiet_open(inst->listPath, MODE_OLDFILE);
 	if (!file) return;
 	inst->listReadable = 1;
 	line = (char *)plugin_alloc(MAX_PATH);
@@ -470,7 +443,7 @@ Evaluate(ObjListInst *inst, ObjReplacementAccess *access)
 	entry = find_entry(inst, access->newFrame);
 	target = 0;
 	if (entry >= 0) {
-		lock = quiet_lock(inst->entries[entry].filename);
+		lock = quiet_lock(inst->entries[entry].filename, ACCESS_READ);
 		if (!lock) return;
 		UnLock(lock);
 		target = inst->entries[entry].filename;
@@ -544,9 +517,8 @@ ui_entry_name(void *data, int index)
 	strcat(uiEntry, number);
 	strcat(uiEntry, " -> ");
 	len = strlen(uiEntry);
-	strncpy(uiEntry + len, uiInst->entries[index].filename,
-	        sizeof(uiEntry) - len - 1);
-	uiEntry[sizeof(uiEntry) - 1] = '\0';
+	spi_copy_string(uiEntry + len, (int)(sizeof(uiEntry) - len),
+	                uiInst->entries[index].filename);
 	return uiEntry;
 }
 

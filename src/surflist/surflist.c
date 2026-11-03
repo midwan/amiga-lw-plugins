@@ -10,12 +10,12 @@
 #include <lwran.h>
 #include <lwpanel.h>
 #include <safe_pluginio.h>
+#include <quiet_dos.h>
 
 #include <string.h>
 
 #include <proto/dos.h>
 #include <proto/exec.h>
-#include <dos/dosextens.h>
 #include <exec/memory.h>
 
 extern struct DosLibrary *DOSBase;
@@ -104,8 +104,6 @@ read_file(const char *path, unsigned long maxSize, unsigned char **out,
 {
 	BPTR lock = 0, fh = 0;
 	struct FileInfoBlock *fib = 0;
-	struct Process *process;
-	APTR oldWindow;
 	unsigned long size;
 	unsigned char *data = 0;
 	int ok = 0;
@@ -114,11 +112,7 @@ read_file(const char *path, unsigned long maxSize, unsigned char **out,
 	*outSize = 0;
 	if (!DOSBase || !path[0]) return 0;
 
-	process = (struct Process *)FindTask(0);
-	oldWindow = process->pr_WindowPtr;
-	process->pr_WindowPtr = (APTR)-1;
-
-	lock = Lock((STRPTR)path, ACCESS_READ);
+	lock = quiet_lock(path, ACCESS_READ);
 	if (!lock) goto done;
 	fib = (struct FileInfoBlock *)AllocMem(sizeof(struct FileInfoBlock), MEMF_PUBLIC);
 	if (!fib || !Examine(lock, fib) || fib->fib_Size < 0 ||
@@ -130,7 +124,7 @@ read_file(const char *path, unsigned long maxSize, unsigned char **out,
 	UnLock(lock);
 	lock = 0;
 
-	fh = Open((STRPTR)path, MODE_OLDFILE);
+	fh = quiet_open(path, MODE_OLDFILE);
 	if (!fh) goto done;
 	data = (unsigned char *)plugin_alloc(size + 1);
 	if (!data || (unsigned long)Read(fh, data, size) != size) goto done;
@@ -145,7 +139,6 @@ done:
 	if (fh) Close(fh);
 	if (fib) FreeMem(fib, sizeof(struct FileInfoBlock));
 	if (lock) UnLock(lock);
-	process->pr_WindowPtr = oldWindow;
 	return ok;
 }
 
@@ -326,8 +319,7 @@ append_entry(SurfListInst *inst, int frame, const char *path)
 	}
 	entry = &inst->entries[inst->numEntries];
 	entry->frame = frame;
-	strncpy(entry->path, path, MAX_PATH - 1);
-	entry->path[MAX_PATH - 1] = '\0';
+	spi_copy_string(entry->path, MAX_PATH, path);
 	if (!load_surface(entry->path, &entry->params)) {
 		if (!has_extension(entry->path) && strlen(entry->path) + 4 < MAX_PATH) {
 			strcat(entry->path, ".srf");
@@ -562,8 +554,7 @@ static void
 status_text(const SurfListInst *inst, char *text, int length)
 {
 	char number[12];
-	strncpy(text, "Parsed ", length - 1);
-	text[length - 1] = '\0';
+	spi_copy_string(text, length, "Parsed ");
 	int_to_str(inst->numEntries, number, sizeof(number));
 	strncat(text, number, length - (int)strlen(text) - 1);
 	strncat(text, " entries, ", length - (int)strlen(text) - 1);
