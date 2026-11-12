@@ -2,10 +2,10 @@
 
 ## Toolchain
 
-- **Docker image**: `amigadev/crosstools:m68k-amigaos-gcc10`. The tag name is stale: it
-  carries AmigaDev GCC 16 builds and moves with their release candidates, so check
-  `m68k-amigaos-gcc --version` before comparing binaries
-- **Compiler**: `m68k-amigaos-gcc` 16.2.1b (AmigaDev 16.2-rc22 on 2026-11-03). GCC 16
+- **Docker image**: `amigadev/crosstools:m68k-amigaos`. The tag moves with the
+  AmigaDev GCC 16 release candidates, so check `m68k-amigaos-gcc --version` before
+  comparing binaries
+- **Compiler**: `m68k-amigaos-gcc` 16.2.1b (AmigaDev 16.2-rc24-9 on 2026-11-12). GCC 16
   defaults to C23, `-fno-common` and LRA (`-mlra` is already on)
 - **Build wrapper**: `./build.sh` runs `make` inside Docker, mounting the project at `/work`
 - **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall $(EXTRA_CFLAGS)` (`CPUFLAGS` defaults to `-m68020`, soft-float).

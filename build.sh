@@ -2,7 +2,7 @@
 # Build LightWave plugins using the Docker cross-compiler
 set -e
 
-DOCKER_IMAGE="amigadev/crosstools:m68k-amigaos-gcc10"
+DOCKER_IMAGE="amigadev/crosstools:m68k-amigaos"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 docker run --rm \

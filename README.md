@@ -62,8 +62,8 @@ plugin table above for the plugin you are installing.
 ## Building From Source
 
 Source builds require Docker and the
-`amigadev/crosstools:m68k-amigaos-gcc10` image. Despite the tag name, the
-image provides `m68k-amigaos-gcc` 16.x, AmigaOS NDK headers and libraries,
+`amigadev/crosstools:m68k-amigaos` image. The image provides
+`m68k-amigaos-gcc` 16.x, AmigaOS NDK headers and libraries,
 and libnix for `-noixemul` builds. CI builds with
 `make package EXTRA_CFLAGS=-Werror`, so new code must compile without
 warnings.
