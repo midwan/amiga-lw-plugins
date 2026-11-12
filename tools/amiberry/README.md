@@ -32,7 +32,7 @@ ULONG DisplayID. P96 32-bit BGRA modes report depth 24 and do not set
 ## Build the guest helpers
 
 ```bash
-docker run --rm -v "$PWD":/work -w /work amigadev/crosstools:m68k-amigaos-gcc10 sh -c \
+docker run --rm -v "$PWD":/work -w /work amigadev/crosstools:m68k-amigaos sh -c \
   'm68k-amigaos-gcc -noixemul -m68020 -O2 -Wall -o LWTest/zzpoke tools/amiberry/zzpoke.c &&
    m68k-amigaos-gcc -noixemul -m68020 -O2 -Wall -o LWTest/rtgmode tools/amiberry/rtgmode.c'
 ```

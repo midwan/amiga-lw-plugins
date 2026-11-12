@@ -1,6 +1,6 @@
 #
 # Makefile for LightWave plugins using m68k-amigaos-gcc
-# Run inside Docker: amigadev/crosstools:m68k-amigaos-gcc10 (GCC 16)
+# Run inside Docker: amigadev/crosstools:m68k-amigaos (GCC 16)
 #
 
 .DEFAULT_GOAL := all
