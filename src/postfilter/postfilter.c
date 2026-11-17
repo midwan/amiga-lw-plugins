@@ -12,6 +12,7 @@
 #include <lwpanel.h>
 #include <safe_pluginio.h>
 
+#include <stddef.h>
 #include <string.h>
 #include <math.h>
 
@@ -299,6 +300,18 @@ luminance(const unsigned char *rgb)
 	return (rgb[0] * 77 + rgb[1] * 150 + rgb[2] * 29) >> 8;
 }
 
+/* Grain seed for one frame: the pattern changes from frame to frame but is
+ * the same each time a given frame is rendered (re-renders, ScreamerNet). */
+static unsigned long
+grain_seed(LWFrame frame)
+{
+	unsigned long h = (unsigned long)frame * 0x9E3779B9UL + 0x13579BDFUL;
+	h ^= h >> 16;
+	h *= 0x7FEB352DUL;
+	h ^= h >> 15;
+	return h;
+}
+
 static void
 apply_smooth(unsigned char *source, unsigned char *target, const unsigned char *mask,
 	int width, int height, int variance)
@@ -396,7 +409,7 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 	unsigned char *front = 0, *back = 0, *mask = 0, *gammaTable = 0;
 	int x, y, pass;
 	int needBack;
-	unsigned long random = 0x13579BDF;
+	unsigned long random;
 	XCALL_INIT;
 	if (fa->width <= 0 || fa->height <= 0) return;
 	pixels = (unsigned long)fa->width * (unsigned long)fa->height;
@@ -463,6 +476,7 @@ Process(PostFilterInst *inst, const FilterAccess *fa)
 		}
 	}
 	if (inst->enableNoise && inst->noise) {
+		random = grain_seed(fa->frame);
 		for (pixel = 0; pixel < pixels; pixel++) {
 			unsigned long base = pixel * 3;
 			int grain;
@@ -532,47 +546,167 @@ DescLn(PostFilterInst *inst)
 
 static const char *regionItems[] = { "Full frame", "Objects only", "Background only", 0 };
 static const char *blurItems[] = { "Box", "Gaussian", 0 };
-static const char *colourText[] = { "Balance and tone", 0 };
-static const char *textureText[] = { "Grain and blur", 0 };
-static const char *detailText[] = { "Smoothing and sharpening", 0 };
+
+enum { CK_BOOL, CK_SLIDER, CK_POPUP };
+
+typedef struct {
+	char *label;		/* LWPanels takes a non-const label */
+	unsigned char kind;
+	unsigned char field;	/* int index into PostFilterInst */
+	unsigned char sameRow;	/* sits to the right of the previous control */
+	short min, max;
+	const char **items;
+} PanelCtl;
+
+#define PF_FIELD(name) (offsetof(PostFilterInst, name) / sizeof(int))
+#define SLIDER_W 100
+#define ROW_GAP 8
+#define COLUMN_GAP 16
+
+/* Two columns keep the panel short on small Layout screens: region and
+ * colour on the left, the filters on the right in the order Process runs
+ * them. */
+static const PanelCtl panelCtls[] = {
+	{ .label = "Region", .kind = CK_POPUP, .field = PF_FIELD(region), .items = regionItems },
+	{ .label = "Colour", .kind = CK_BOOL, .field = PF_FIELD(enableColor) },
+	{ .label = "Red %", .kind = CK_SLIDER, .field = PF_FIELD(red), .min = 0, .max = 200 },
+	{ .label = "Green %", .kind = CK_SLIDER, .field = PF_FIELD(green), .min = 0, .max = 200 },
+	{ .label = "Blue %", .kind = CK_SLIDER, .field = PF_FIELD(blue), .min = 0, .max = 200 },
+	{ .label = "Brightness %", .kind = CK_SLIDER, .field = PF_FIELD(brightness), .min = 0, .max = 200 },
+	{ .label = "Contrast %", .kind = CK_SLIDER, .field = PF_FIELD(contrast), .min = 0, .max = 200 },
+	{ .label = "Gamma %", .kind = CK_SLIDER, .field = PF_FIELD(gamma), .min = 10, .max = 300 },
+	{ .label = "Saturation %", .kind = CK_SLIDER, .field = PF_FIELD(saturation), .min = 0, .max = 200 },
+	{ .label = "Greyscale", .kind = CK_BOOL, .field = PF_FIELD(greyscale) },
+	{ .label = "Negative", .kind = CK_BOOL, .field = PF_FIELD(negative), .sameRow = 1 },
+	{ .label = "Posterize", .kind = CK_SLIDER, .field = PF_FIELD(posterize), .min = 0, .max = 32 },
+	{ .label = "Grain", .kind = CK_BOOL, .field = PF_FIELD(enableNoise) },
+	{ .label = "Grain Amount", .kind = CK_SLIDER, .field = PF_FIELD(noise), .min = 0, .max = 100 },
+	{ .label = "Blur", .kind = CK_BOOL, .field = PF_FIELD(enableBlur) },
+	{ .label = "Blur Radius", .kind = CK_SLIDER, .field = PF_FIELD(blurRadius), .min = 1, .max = 12 },
+	{ .label = "Blur Style", .kind = CK_POPUP, .field = PF_FIELD(blurStyle), .items = blurItems },
+	{ .label = "Smooth", .kind = CK_BOOL, .field = PF_FIELD(enableSmooth) },
+	{ .label = "Smooth Variance", .kind = CK_SLIDER, .field = PF_FIELD(variance), .min = 0, .max = 255 },
+	{ .label = "Passes", .kind = CK_SLIDER, .field = PF_FIELD(passes), .min = 1, .max = 4 },
+	{ .label = "Sharpen", .kind = CK_BOOL, .field = PF_FIELD(enableSharpen) },
+	{ .label = "Sharpen Amount", .kind = CK_SLIDER, .field = PF_FIELD(sharpen), .min = 0, .max = 200 },
+};
+
+#define LEFT_COUNT 12
+#define CTL_COUNT ((int)(sizeof(panelCtls) / sizeof(panelCtls[0])))
+
+/* Panel state lives in static data: the panel is modal, and the LWPanels
+ * macros need a desc and value named desc/ival in scope. */
+static LWControl *panelCon[CTL_COUNT];
+static LWPanControlDesc desc;
+static LWValue ival = { LWT_INTEGER };
+
+/* The CON_* macros all return the shared ival, so two of them in one
+ * expression read the same value; these return a copy instead. */
+static int
+con_get(LWControl *ctl, int tag)
+{
+	(*ctl->get)(ctl, tag, &ival);
+	return ival.intv.value;
+}
+
+static void
+con_move(LWControl *ctl, int x, int y)
+{
+	MOVE_CON(ctl, x, y);
+}
+
+/* Place one column of auto-placed controls with its left edge at x and its
+ * rows moved by dy. Labels are right-aligned so every slider, popup and
+ * check box starts at the same x. A row shared by several controls (the
+ * sameRow ones go to the right of the previous control) starts at x so it
+ * stays within the column, and the rows below move up by the rows freed. */
+static void
+place_column(LWControl **con, const PanelCtl *spec, int count, int x, int dy)
+{
+	int i, label, hot = 0, lift = 0, prevAuto = 0;
+	for (i = 0; i < count; i++) {
+		if (spec[i].sameRow) continue;
+		label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
+		if (label > hot) hot = label;
+	}
+	for (i = 0; i < count; i++) {
+		int autoY = con_get(con[i], CTL_Y);
+		if (spec[i].sameRow && i > 0) {
+			con_move(con[i],
+				con_get(con[i - 1], CTL_X) + con_get(con[i - 1], CTL_W) + ROW_GAP,
+				con_get(con[i - 1], CTL_Y));
+			lift += autoY - prevAuto;
+		} else if (i + 1 < count && spec[i + 1].sameRow) {
+			con_move(con[i], x, autoY - lift + dy);
+		} else {
+			label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
+			con_move(con[i], x + hot - label, autoY - lift + dy);
+		}
+		prevAuto = autoY;
+	}
+}
+
+static void
+layout_panel(LWPanelFuncs *panl, LWPanelID pan)
+{
+	int i, edge, autoBottom = 0, bottom = 0, right = 0, margin, dy;
+	for (i = 0; i < CTL_COUNT; i++) {
+		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
+		if (edge > autoBottom) autoBottom = edge;
+	}
+	/* Space LWPanels leaves under the controls for its OK/Cancel row. */
+	autoBottom = PAN_GETH(panl, pan) - autoBottom;
+	margin = con_get(panelCon[0], CTL_X);
+	dy = con_get(panelCon[0], CTL_Y) - con_get(panelCon[LEFT_COUNT], CTL_Y);
+	place_column(panelCon, panelCtls, LEFT_COUNT, margin, 0);
+	for (i = 0; i < LEFT_COUNT; i++) {
+		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
+		if (edge > right) right = edge;
+	}
+	place_column(panelCon + LEFT_COUNT, panelCtls + LEFT_COUNT, CTL_COUNT - LEFT_COUNT,
+		right + COLUMN_GAP, dy);
+	for (i = 0; i < CTL_COUNT; i++) {
+		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
+		if (edge > right) right = edge;
+		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
+		if (edge > bottom) bottom = edge;
+	}
+	PAN_SETW(panl, pan, right + margin);
+	PAN_SETH(panl, pan, bottom + autoBottom);
+}
 
 XCALL_(static int)
 Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverData)
 {
 	LWPanelFuncs *panl;
 	LWPanelID pan;
-	LWControl *region, *colour, *red, *green, *blue, *brightness, *contrast, *gamma, *saturation;
-	LWControl *grey, *negative, *posterize, *noiseOn, *noise, *blurOn, *blurRadius, *blurStyle;
-	LWControl *sharpenOn, *sharpen, *smoothOn, *variance, *passes;
+	int *values = &inst->region;
+	int i;
 	XCALL_INIT;
 	if (version != 1) return AFUNC_BADVERSION;
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
 	panl = (LWPanelFuncs *)(*global)(PANEL_SERVICES_NAME, GFUSE_TRANSIENT);
 	if (!panl) return AFUNC_OK;
-	{
-		static LWPanControlDesc desc;
-		static LWValue ival = { LWT_INTEGER };
-		pan = PAN_CREATE(panl, "PostFilter v" PLUGIN_VERSION);
-		if (!pan) return AFUNC_OK;
-		region = POPUP_CTL(panl, pan, "Region", regionItems);
-		TEXT_CTL(panl, pan, "Colour", colourText);
-		colour = BOOL_CTL(panl, pan, "Enable Colour");
-		red = SLIDER_CTL(panl, pan, "Red %", 130, 0, 200); green = SLIDER_CTL(panl, pan, "Green %", 130, 0, 200); blue = SLIDER_CTL(panl, pan, "Blue %", 130, 0, 200);
-		brightness = SLIDER_CTL(panl, pan, "Brightness %", 130, 0, 200); contrast = SLIDER_CTL(panl, pan, "Contrast %", 130, 0, 200); gamma = SLIDER_CTL(panl, pan, "Gamma %", 130, 10, 300); saturation = SLIDER_CTL(panl, pan, "Saturation %", 130, 0, 200);
-		grey = BOOL_CTL(panl, pan, "Greyscale"); negative = BOOL_CTL(panl, pan, "Negative"); posterize = SLIDER_CTL(panl, pan, "Posterize Levels", 130, 0, 32);
-		TEXT_CTL(panl, pan, "Texture", textureText);
-		noiseOn = BOOL_CTL(panl, pan, "Enable Grain"); noise = SLIDER_CTL(panl, pan, "Grain Amount", 130, 0, 100);
-		blurOn = BOOL_CTL(panl, pan, "Enable Blur"); blurRadius = SLIDER_CTL(panl, pan, "Blur Radius", 130, 1, 12); blurStyle = POPUP_CTL(panl, pan, "Blur Style", blurItems);
-		TEXT_CTL(panl, pan, "Detail", detailText);
-		sharpenOn = BOOL_CTL(panl, pan, "Enable Sharpen"); sharpen = SLIDER_CTL(panl, pan, "Sharpen Amount", 130, 0, 200);
-		smoothOn = BOOL_CTL(panl, pan, "Enable Smooth"); variance = SLIDER_CTL(panl, pan, "Smooth Variance", 130, 0, 255); passes = SLIDER_CTL(panl, pan, "Passes", 130, 1, 4);
-		SET_INT(region, inst->region); SET_INT(colour, inst->enableColor); SET_INT(red, inst->red); SET_INT(green, inst->green); SET_INT(blue, inst->blue); SET_INT(brightness, inst->brightness); SET_INT(contrast, inst->contrast); SET_INT(gamma, inst->gamma); SET_INT(saturation, inst->saturation); SET_INT(grey, inst->greyscale); SET_INT(negative, inst->negative); SET_INT(posterize, inst->posterize); SET_INT(noiseOn, inst->enableNoise); SET_INT(noise, inst->noise); SET_INT(blurOn, inst->enableBlur); SET_INT(blurRadius, inst->blurRadius); SET_INT(blurStyle, inst->blurStyle); SET_INT(sharpenOn, inst->enableSharpen); SET_INT(sharpen, inst->sharpen); SET_INT(smoothOn, inst->enableSmooth); SET_INT(variance, inst->variance); SET_INT(passes, inst->passes);
-		if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
-			GET_INT(region, inst->region); GET_INT(colour, inst->enableColor); GET_INT(red, inst->red); GET_INT(green, inst->green); GET_INT(blue, inst->blue); GET_INT(brightness, inst->brightness); GET_INT(contrast, inst->contrast); GET_INT(gamma, inst->gamma); GET_INT(saturation, inst->saturation); GET_INT(grey, inst->greyscale); GET_INT(negative, inst->negative); GET_INT(posterize, inst->posterize); GET_INT(noiseOn, inst->enableNoise); GET_INT(noise, inst->noise); GET_INT(blurOn, inst->enableBlur); GET_INT(blurRadius, inst->blurRadius); GET_INT(blurStyle, inst->blurStyle); GET_INT(sharpenOn, inst->enableSharpen); GET_INT(sharpen, inst->sharpen); GET_INT(smoothOn, inst->enableSmooth); GET_INT(variance, inst->variance); GET_INT(passes, inst->passes);
-			normalise(inst);
-		}
-		PAN_KILL(panl, pan);
+	pan = PAN_CREATE(panl, "PostFilter v" PLUGIN_VERSION);
+	if (!pan) return AFUNC_OK;
+	for (i = 0; i < CTL_COUNT; i++) {
+		const PanelCtl *c = &panelCtls[i];
+		if (c->kind == CK_BOOL)
+			panelCon[i] = BOOL_CTL(panl, pan, c->label);
+		else if (c->kind == CK_SLIDER)
+			panelCon[i] = SLIDER_CTL(panl, pan, c->label, SLIDER_W, c->min, c->max);
+		else
+			panelCon[i] = POPUP_CTL(panl, pan, c->label, c->items);
+		if (!panelCon[i]) goto done;
 	}
+	layout_panel(panl, pan);
+	for (i = 0; i < CTL_COUNT; i++) SET_INT(panelCon[i], values[panelCtls[i].field]);
+	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
+		for (i = 0; i < CTL_COUNT; i++) GET_INT(panelCon[i], values[panelCtls[i].field]);
+		normalise(inst);
+	}
+done:
+	PAN_KILL(panl, pan);
 	return AFUNC_OK;
 }
 

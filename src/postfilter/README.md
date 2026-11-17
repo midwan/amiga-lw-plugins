@@ -43,7 +43,8 @@ Enabled operations run in this fixed order:
 
 1. **Colour** — RGB balance, brightness, contrast, gamma, saturation,
    greyscale, negative and posterize.
-2. **Grain** — deterministic monochrome noise.
+2. **Grain** — monochrome noise. The pattern changes from frame to frame,
+   and a frame rendered again gets the same pattern.
 3. **Blur** — separable box or weighted Gaussian-style blur.
 4. **Smooth** — a 3×3 edge-preserving pass that averages only neighbours
    whose luminance differs by no more than **Smooth Variance**.

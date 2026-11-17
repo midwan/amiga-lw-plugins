@@ -427,6 +427,31 @@ Available control macros: `INT_CTL`, `FLOAT_CTL`, `STR_CTL`, `BOOL_CTL`, `RGB_CT
 `CANVAS_CTL`, `CUSTPOPUP_CTL`, `ITEM_CTL`, `LISTBOX_CTL`, `PERCENT_CTL`,
 `TABCHOICE_CTL`, `BORDER_CTL`, `DRAGBUT_CTL`, etc.
 
+Panel facts measured with the `lwpanels.p` shipped with LightwaveRTG:
+
+- `TABCHOICE_CTL` is LWPanels API v16 (1998). Neither LightwaveRTG's
+  `lwpanels.p` nor the February 1997 one registers `TabChoiceControl` (or
+  the v14 `BorderControl`), so there is no native tab control.
+- `PAN_GETVERSION` returns 0, which the SDK docs define as older than the
+  API that added `PAN_VERSION` (September 1996). Don't assume any feature
+  the header marks with an API version.
+- Controls stack in one column, labels left-aligned. A long panel runs off
+  the Layout screen: the 25-row PostFilter panel was about 890 pixels tall.
+  Arrange the controls in columns with `MOVE_CON`, then `PAN_SETW`/`PAN_SETH`.
+  To line up sliders, move each control so that `CTL_HOTX` (the start of
+  the slider or popup) is the same in a column; labels then end right-aligned.
+- `CON_X`, `CON_Y`, `CON_W`, `CON_H` and the other `CON_*` getters all
+  return the shared `ival`. Two of them in one expression
+  (`CON_X(a) + CON_W(a)`, `CON_Y(a) - CON_Y(b)`) read the same value.
+  Read each one in its own statement or through a function that returns
+  a copy (`con_get()` in `postfilter.c`).
+- Control events (`CON_SETEVENT`) work. `GHOST_CON`/`RENDER_CON` called from
+  one grey out a control and restore it, and a ghosted slider ignores clicks.
+- Panel hooks are unsafe. A `PAN_USERDRAW` hook that called `GHOST_CON`
+  left the panel blank and crashed Layout, and a `PAN_USERACTIVATE` hook
+  that called it crashed Layout too. There is no known way to ghost
+  controls when the panel opens, which is why PostFilter does not ghost.
+
 ---
 
 ## 5.x SDK Changes from 4.0
