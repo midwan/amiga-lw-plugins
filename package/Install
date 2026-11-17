@@ -6,55 +6,39 @@
 (set #version "@VERSION@")
 
 (welcome
-	(cat "LightWave 3D 5.x plugins " #version " for AmigaOS (68020 or better).\n\n"
-		"Installer copies the plugin build that matches your CPU and FPU into your LightWave plug-ins drawer.")
+	(cat "LightWave 3D 5.x plugins " #version " for AmigaOS (68020 or better with an FPU, like LightWave itself).\n\n"
+		"Installer copies the plugin build that matches your CPU into your LightWave plug-ins drawer.")
 )
 
 ; --------------------------------------------------------------------
-; Build variant. The FPU builds run the shader, filter and motion maths
-; on the FPU; the Generic build uses software floating point and runs on
-; any 68020 or better, including 68EC020/68EC030/68LC040/68LC060.
-
-; (database "fpu") answers "unknown" on the OS 3.1 Installer (43.x), so an
-; FPU build is preselected only when the Installer reports an FPU; an
-; unknown or missing FPU defaults to Generic, which runs everywhere.
+; Build variant. LightWave 5.x runs only with an FPU, so every build uses
+; it; the builds differ in the CPU they target. The CPU alone picks the
+; default: (database "fpu") answers "unknown" on the OS 3.1 Installer (43.x).
 (set #cpu (database "cpu"))
-(set #fpu (database "fpu"))
-(set #has-fpu
-	(AND (<> #fpu "NOFPU")
-		(AND (<> #fpu "unknown") (<> #fpu ""))))
-(set #is060
-	(OR (= #cpu "68060")
-		(<> (getversion "68060.library" (resident)) 0)))
 (set #variant
-	(if (NOT #has-fpu)
-		0
-		(if #is060
-			3
-			(if (= #cpu "68040")
-				2
-				(if (OR (= #cpu "68020") (= #cpu "68030")) 1 0)))))
+	(if (OR (= #cpu "68060")
+			(<> (getversion "68060.library" (resident)) 0))
+		2
+		(if (= #cpu "68040") 1 0)))
 
 (set #variant
 	(askchoice
 		(prompt
 			"Which plugin build should be installed?\n\n"
-			"Detected CPU: " #cpu "\nDetected FPU: " #fpu)
+			"Detected CPU: " #cpu)
 		(help
-			"Generic: runs on any 68020 or better, with or without an FPU. Use it on 68EC020/68EC030, 68LC040 and 68LC060 systems, or when unsure.\n\n"
 			"68020/68030 + FPU: needs a 68881 or 68882 coprocessor.\n\n"
 			"68040: needs a full 68040 with its built-in FPU.\n\n"
 			"68060: needs a full 68060 with its built-in FPU and 68060.library.\n\n"
 			"The 68040 and 68060 builds use instructions a 68881/68882 does not have. The 68020/68030 build runs on a 68040/68060 only through slow emulation.\n\n"
-			"The detected CPU and FPU select the default. If this Installer cannot report the FPU, Generic is preselected: pick the FPU build yourself when your CPU has one.")
+			"The detected CPU selects the default.")
 		(choices
-			"Generic (68020+, no FPU needed)"
 			"68020/68030 with 68881/68882 FPU"
 			"68040 with FPU"
 			"68060 with FPU")
 		(default #variant)))
 
-(set #srcdir (tackon "Plugins" (select #variant "Generic" "020fpu" "040fpu" "060fpu")))
+(set #srcdir (tackon "Plugins" (select #variant "020fpu" "040fpu" "060fpu")))
 
 ; --------------------------------------------------------------------
 ; Destination.

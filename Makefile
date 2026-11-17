@@ -14,7 +14,9 @@ SDK_SRC  = sdk/source
 SDK_LIB  = sdk/lib
 
 SRC      = src
-CPUFLAGS = -m68020
+# LightWave 5.x (Layout.fp, Modeler.fp, Lwsn.fp) needs an FPU, so every build
+# uses it. The default build targets 68020/68030 + 68881/68882.
+CPUFLAGS = -m68020 -m68881
 BUILD    = build
 PVER     = $(shell cat VERSION)
 
@@ -223,40 +225,41 @@ PLUGIN_FILES = objswap objlist2 objmeshswap fresnel surflist pbr specflare pngsa
 
 all: sdk $(PLUGINS)
 
-# ---- FPU variants ----
+# ---- 68040/68060 variants ----
 # Each variant is a full `all` build with its own CPU flags, build directory
-# and SDK library (build-<variant>/). 020fpu targets 68020/68030 + 68881/68882.
-# 040fpu/060fpu emit fd*/fs* instructions that only the 68040/68060 on-chip
-# FPU implements, so they must not be used with a 68881/68882.
-FPU_VARIANTS    = 020fpu 040fpu 060fpu
-CPUFLAGS_020fpu = -m68020 -m68881
+# and SDK library (build-<variant>/). They emit fd*/fs* instructions that only
+# the 68040/68060 on-chip FPU implements, so they must not be used with a
+# 68881/68882. The default build runs on a 68040/68060 too, but its fmovecr,
+# fintrz and transcendental instructions trap to 68040/68060.library there.
+CPU_VARIANTS    = 040fpu 060fpu
 CPUFLAGS_040fpu = -m68040 -m68881
 CPUFLAGS_060fpu = -m68060 -m68881
 
-fpu: $(FPU_VARIANTS)
+variants: $(CPU_VARIANTS)
 
-$(FPU_VARIANTS):
+$(CPU_VARIANTS):
 	$(MAKE) all CPUFLAGS="$(CPUFLAGS_$@)" BUILD=build-$@ SDK_LIB=build-$@/sdklib
 
 # ---- Release package ----
-# LW-Plugins-<version>.lha: Installer script, the Generic build and every FPU
-# variant, plus per-plugin docs converted to Latin-1 for Amiga text viewers
-# (iconv fails on characters package/latin1.sed does not map).
+# LW-Plugins-<version>.lha: Installer script, the default build (as
+# Plugins/020fpu) and the 68040/68060 variants, plus per-plugin docs converted
+# to Latin-1 for Amiga text viewers (iconv fails on characters
+# package/latin1.sed does not map).
 # Level-1 LHA headers: 7-Zip mis-extracts level-0 paths written by LHa for UNIX.
 PKG_ROOT  = LW-Plugins
 PKG_DIR   = $(BUILD)/package
 PKG_STAGE = $(PKG_DIR)/$(PKG_ROOT)
 PKG_LHA   = $(BUILD)/$(PKG_ROOT)-$(PVER).lha
 
-package: all fpu
+package: all variants
 	rm -rf $(PKG_DIR) $(PKG_LHA)
-	mkdir -p $(PKG_STAGE)/Plugins/Generic $(PKG_STAGE)/Docs
-	cp $(PLUGIN_FILES:%=$(BUILD)/%.p) $(PKG_STAGE)/Plugins/Generic/
-	for v in $(FPU_VARIANTS); do \
+	mkdir -p $(PKG_STAGE)/Plugins/020fpu $(PKG_STAGE)/Docs
+	cp $(PLUGIN_FILES:%=$(BUILD)/%.p) $(PKG_STAGE)/Plugins/020fpu/
+	for v in $(CPU_VARIANTS); do \
 		mkdir -p $(PKG_STAGE)/Plugins/$$v && \
 		cp $(PLUGIN_FILES:%=build-$$v/%.p) $(PKG_STAGE)/Plugins/$$v/ || exit 1; \
 	done
-	for d in Generic $(FPU_VARIANTS); do cp package/icons/drawer.info $(PKG_STAGE)/Plugins/$$d.info || exit 1; done
+	for d in 020fpu $(CPU_VARIANTS); do cp package/icons/drawer.info $(PKG_STAGE)/Plugins/$$d.info || exit 1; done
 	sed 's/@VERSION@/$(PVER)/' package/Install | tr -d '\r' > $(PKG_STAGE)/Install
 	cp package/icons/Install.info $(PKG_STAGE)/Install.info
 	cp package/icons/drawer.info $(PKG_STAGE)/Plugins.info
@@ -274,6 +277,6 @@ package: all fpu
 
 clean:
 	rm -f $(BUILD)/*.o $(BUILD)/*.p $(SDK_LIB)/server.a $(SDK_LIB)/serv_gcc.o
-	rm -rf $(addprefix build-,$(FPU_VARIANTS)) $(PKG_DIR) $(BUILD)/$(PKG_ROOT)-*.lha
+	rm -rf $(addprefix build-,$(CPU_VARIANTS)) $(PKG_DIR) $(BUILD)/$(PKG_ROOT)-*.lha
 
-.PHONY: all sdk $(PLUGINS) clean fpu $(FPU_VARIANTS) package
+.PHONY: all sdk $(PLUGINS) clean variants $(CPU_VARIANTS) package

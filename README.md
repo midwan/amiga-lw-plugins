@@ -46,12 +46,13 @@ Most users should install a published release rather than build from source.
 5. Restart Layout so LightWave writes the plugin entry to its config file.
    GEOimport and Instancer are registered the same way in Modeler.
 
-The archive holds four builds of every plugin under `LW-Plugins/Plugins/`.
-To install by hand, copy the `.p` files from the drawer matching your CPU:
+LightWave 5.x needs an FPU, and every build of the plugins uses it. The
+archive holds three builds of every plugin under `LW-Plugins/Plugins/`, one
+per CPU. To install by hand, copy the `.p` files from the drawer matching
+your CPU:
 
 | Drawer | CPU |
 |---|---|
-| `Generic` | Any 68020 or better, with or without FPU (68EC020/030, 68LC040/060) |
 | `020fpu` | 68020/68030 with a 68881/68882 |
 | `040fpu` | 68040 with FPU |
 | `060fpu` | 68060 with FPU |
@@ -102,36 +103,37 @@ Clean generated objects and plugin binaries:
 ./build.sh clean
 ```
 
-Build outputs are written to `build/`.
+Build outputs are written to `build/`. After changing `CPUFLAGS` or pulling a
+change to the default flags, run `./build.sh clean` first: `make` does not
+rebuild objects when only the flags change.
 
-Build the release archive (`build/LW-Plugins-<version>.lha`, all four builds,
-Installer script and Latin-1 docs):
+Build the release archive (`build/LW-Plugins-<version>.lha`, all three
+builds, Installer script and Latin-1 docs):
 
 ```bash
 ./build.sh package
 ```
 
-### FPU builds
+### CPU builds
 
-The default build targets a 68020 without an FPU, so all floating-point math
-goes through software routines. FPU builds use the FPU directly and render
-faster with the shader, filter, and motion plugins:
+The default build targets a 68020/68030 with a 68881/68882. The 68040 and
+68060 builds are variants with their own build directories:
 
 ```bash
-./build.sh fpu       # all FPU variants
+./build.sh variants  # 040fpu and 060fpu
 ./build.sh 040fpu    # a single variant
 ```
 
-| Variant | Flags | Use on | Output |
-|---|---|---|---|
-| `020fpu` | `-m68020 -m68881` | 68020/68030 with a 68881/68882 | `build-020fpu/` |
-| `040fpu` | `-m68040 -m68881` | 68040 | `build-040fpu/` |
-| `060fpu` | `-m68060 -m68881` | 68060 | `build-060fpu/` |
+| Build | Flags | Use on | Output | Package drawer |
+|---|---|---|---|---|
+| default | `-m68020 -m68881` | 68020/68030 with a 68881/68882 | `build/` | `020fpu` |
+| `040fpu` | `-m68040 -m68881` | 68040 | `build-040fpu/` | `040fpu` |
+| `060fpu` | `-m68060 -m68881` | 68060 | `build-060fpu/` | `060fpu` |
 
 The `040fpu` and `060fpu` builds use `fd*`/`fs*` instructions that exist only
 in the 68040/68060 on-chip FPU. Do not use them with a 68881/68882. The
-`020fpu` build runs on a 68040/68060 only through the 68040/68060.library
-emulation traps, so pick the variant that matches your CPU.
+default build runs on a 68040/68060 only through the 68040/68060.library
+emulation traps, so pick the build that matches your CPU.
 
 ## SDK
 
@@ -139,8 +141,8 @@ The `sdk/` directory contains the LightWave 5.x SDK headers and support
 library patched for GCC compatibility:
 
 - `sdk/include/` - LW SDK headers
-- `sdk/lib/` - built server library and startup object (FPU variants build
-  their own copy in `build-<variant>/sdklib/`)
+- `sdk/lib/` - built server library and startup object (the 040fpu and
+  060fpu variants build their own copy in `build-<variant>/sdklib/`)
 - `sdk/source/` - server library source, GCC startup assembly, and stubs
 
 ## Project Structure

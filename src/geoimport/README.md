@@ -77,8 +77,8 @@ the original renders exactly.
 ## Installation
 
 1. Run `Install` from the `LW-Plugins` release archive, or copy `geoimport.p`
-   from the archive's `Plugins/` drawer that matches your CPU (`Generic`,
-   `020fpu`, `040fpu` or `060fpu`) to your LightWave Modeler plugins directory
+   from the archive's `Plugins/` drawer that matches your CPU (`020fpu`,
+   `040fpu` or `060fpu`) to your LightWave Modeler plugins directory
 2. Run Modeler and, without loading any object, under the Menu layout click on
    'Add Plug-Ins'
 3. Navigate to the directory you copied the plugin and select it.

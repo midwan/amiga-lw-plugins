@@ -10,8 +10,8 @@ WaveFilter. It is not derived from WaveFilter source code.
 ## Installation
 
 1. Run `Install` from the `LW-Plugins` archive, or copy `postfilter.p` from
-   the `Plugins/Generic`, `Plugins/020fpu`, `Plugins/040fpu` or
-   `Plugins/060fpu` drawer that matches the CPU.
+   the `Plugins/020fpu`, `Plugins/040fpu` or `Plugins/060fpu` drawer that
+   matches the CPU.
 2. In Layout, with no scene or object loaded, choose **Options > Add Plug-Ins**
    and select `postfilter.p`.
 3. Restart Layout so it records the plug-in.
