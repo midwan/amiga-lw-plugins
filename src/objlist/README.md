@@ -42,8 +42,8 @@ ObjList loads `Work:Lists/models/flower.lwo`.
 1. Load the object that should appear before the first list entry.
 2. Select that object and choose **Obj Rep Plug-ins > ObjList**.
 3. Click **Options**, then **Pick List...** and select the list file.
-4. The panel shows each parsed `Frame -> file` entry. Render or preview the
-   animation.
+4. The panel shows how many `Frame -> file` entries it parsed. Render or
+   preview the animation.
 
 The list file path is saved in the scene and is parsed again when the scene is
 loaded. The list requester starts in the selected list's directory. Before a

@@ -17,6 +17,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <string.h>
@@ -534,6 +535,12 @@ Interface(
 		ctlOutR      = SLIDER_CTL(panl, pan, "Outline R", 150, 0, 255);
 		ctlOutG      = SLIDER_CTL(panl, pan, "Outline G", 150, 0, 255);
 		ctlOutB      = SLIDER_CTL(panl, pan, "Outline B", 150, 0, 255);
+		{
+			LWControl *col[] = { ctlEnQuant, ctlBands, ctlEnOutline,
+			                     ctlDepthThr, ctlColorThr, ctlWidth,
+			                     ctlOutR, ctlOutG, ctlOutB };
+			pl_columns(panl, pan, col, 0, 9, 9);
+		}
 
 		SET_INT(ctlEnQuant, inst->enableQuant);
 		SET_INT(ctlBands, inst->bands);

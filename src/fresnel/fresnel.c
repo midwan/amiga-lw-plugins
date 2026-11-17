@@ -16,6 +16,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <string.h>
@@ -433,6 +434,11 @@ Interface(
 		ctlDiffPow = SLIDER_CTL(panl, pan, "Diffuse Power",
 		                        150, 1, 10);
 		ctlSpecular = BOOL_CTL(panl, pan, "Affect Specular");
+		{
+			LWControl *col[] = { ctlIOR, ctlMirror, ctlReflPow, ctlTrans,
+			                     ctlDiffuse, ctlDiffPow, ctlSpecular };
+			pl_columns(panl, pan, col, 0, 7, 7);
+		}
 
 		SET_FLOAT(ctlIOR, inst->ior);
 		SET_INT(ctlMirror, inst->affectMirror);

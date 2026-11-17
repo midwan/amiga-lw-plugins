@@ -10,6 +10,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <stddef.h>
@@ -560,8 +561,6 @@ typedef struct {
 
 #define PF_FIELD(name) (offsetof(PostFilterInst, name) / sizeof(int))
 #define SLIDER_W 100
-#define ROW_GAP 8
-#define COLUMN_GAP 16
 
 /* Two columns keep the panel short on small Layout screens: region and
  * colour on the left, the filters on the right in the order Process runs
@@ -600,81 +599,6 @@ static LWControl *panelCon[CTL_COUNT];
 static LWPanControlDesc desc;
 static LWValue ival = { LWT_INTEGER };
 
-/* The CON_* macros all return the shared ival, so two of them in one
- * expression read the same value; these return a copy instead. */
-static int
-con_get(LWControl *ctl, int tag)
-{
-	(*ctl->get)(ctl, tag, &ival);
-	return ival.intv.value;
-}
-
-static void
-con_move(LWControl *ctl, int x, int y)
-{
-	MOVE_CON(ctl, x, y);
-}
-
-/* Place one column of auto-placed controls with its left edge at x and its
- * rows moved by dy. Labels are right-aligned so every slider, popup and
- * check box starts at the same x. A row shared by several controls (the
- * sameRow ones go to the right of the previous control) starts at x so it
- * stays within the column, and the rows below move up by the rows freed. */
-static void
-place_column(LWControl **con, const PanelCtl *spec, int count, int x, int dy)
-{
-	int i, label, hot = 0, lift = 0, prevAuto = 0;
-	for (i = 0; i < count; i++) {
-		if (spec[i].sameRow) continue;
-		label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
-		if (label > hot) hot = label;
-	}
-	for (i = 0; i < count; i++) {
-		int autoY = con_get(con[i], CTL_Y);
-		if (spec[i].sameRow && i > 0) {
-			con_move(con[i],
-				con_get(con[i - 1], CTL_X) + con_get(con[i - 1], CTL_W) + ROW_GAP,
-				con_get(con[i - 1], CTL_Y));
-			lift += autoY - prevAuto;
-		} else if (i + 1 < count && spec[i + 1].sameRow) {
-			con_move(con[i], x, autoY - lift + dy);
-		} else {
-			label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
-			con_move(con[i], x + hot - label, autoY - lift + dy);
-		}
-		prevAuto = autoY;
-	}
-}
-
-static void
-layout_panel(LWPanelFuncs *panl, LWPanelID pan)
-{
-	int i, edge, autoBottom = 0, bottom = 0, right = 0, margin, dy;
-	for (i = 0; i < CTL_COUNT; i++) {
-		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
-		if (edge > autoBottom) autoBottom = edge;
-	}
-	/* Space LWPanels leaves under the controls for its OK/Cancel row. */
-	autoBottom = PAN_GETH(panl, pan) - autoBottom;
-	margin = con_get(panelCon[0], CTL_X);
-	dy = con_get(panelCon[0], CTL_Y) - con_get(panelCon[LEFT_COUNT], CTL_Y);
-	place_column(panelCon, panelCtls, LEFT_COUNT, margin, 0);
-	for (i = 0; i < LEFT_COUNT; i++) {
-		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
-		if (edge > right) right = edge;
-	}
-	place_column(panelCon + LEFT_COUNT, panelCtls + LEFT_COUNT, CTL_COUNT - LEFT_COUNT,
-		right + COLUMN_GAP, dy);
-	for (i = 0; i < CTL_COUNT; i++) {
-		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
-		if (edge > right) right = edge;
-		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
-		if (edge > bottom) bottom = edge;
-	}
-	PAN_SETW(panl, pan, right + margin);
-	PAN_SETH(panl, pan, bottom + autoBottom);
-}
-
 XCALL_(static int)
 Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverData)
 {
@@ -699,7 +623,11 @@ Interface(long version, GlobalFunc *global, PostFilterInst *inst, void *serverDa
 			panelCon[i] = POPUP_CTL(panl, pan, c->label, c->items);
 		if (!panelCon[i]) goto done;
 	}
-	layout_panel(panl, pan);
+	{
+		unsigned char sameRow[CTL_COUNT];
+		for (i = 0; i < CTL_COUNT; i++) sameRow[i] = panelCtls[i].sameRow;
+		pl_columns(panl, pan, panelCon, sameRow, CTL_COUNT, LEFT_COUNT);
+	}
 	for (i = 0; i < CTL_COUNT; i++) SET_INT(panelCon[i], values[panelCtls[i].field]);
 	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
 		for (i = 0; i < CTL_COUNT; i++) GET_INT(panelCon[i], values[panelCtls[i].field]);

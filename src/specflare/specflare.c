@@ -11,6 +11,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <proto/exec.h>
@@ -679,6 +680,12 @@ Interface(
 		ctlRing = BOOL_CTL(panl, pan, "Show Ring");
 		ctlAnamorphic = BOOL_CTL(panl, pan, "Anamorphic");
 		ctlMaxFlr = SLIDER_CTL(panl, pan, "Max Flares", 150, 1, MAX_FLARES);
+		{
+			LWControl *col[] = { ctlThresh, ctlGlow, ctlStreak, ctlInten,
+			                     ctlStar, ctlRotation, ctlSpin, ctlRing,
+			                     ctlAnamorphic, ctlMaxFlr };
+			pl_columns(panl, pan, col, 0, 10, 10);
+		}
 
 		SET_INT(ctlThresh, inst->threshold);
 		SET_INT(ctlGlow, inst->glowRadius);

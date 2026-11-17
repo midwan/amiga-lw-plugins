@@ -5,6 +5,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <lwmath.h>
 #include <safe_pluginio.h>
 #include <string.h>
@@ -779,7 +780,7 @@ XCALL_(static const char *) DescLn(NormalMapInst *inst)
 
 static const char *projNames[] = { "Planar XY", "Planar XZ", "Planar YZ", "Triplanar (box)", 0 };
 static const char *albedoModeNames[] = { "Multiply base colour", "Replace base colour", 0 };
-static const char *slotLabels[NMAP_SLOT_COUNT] = { "Normal image", "Albedo / Colour", "Roughness", "Metallic", "Ambient occlusion", "Specular" };
+static const char *slotLabels[NMAP_SLOT_COUNT] = { "Normal image", "Albedo / Colour", "Roughness", "Metallic", "AO", "Specular" };
 
 static void select_popup_slot(NormalMapInst *inst, int slot, int index, int count, LWImageID *ids, const char **names)
 {
@@ -802,7 +803,7 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	static LWImageID ids[NMAP_MAX_POPUP_IMAGES + NMAP_SLOT_COUNT];
 	static LWPanControlDesc desc;
 	static LWValue ival = { LWT_INTEGER };
-	static const char *amountLabels[] = { "Albedo amount", "Roughness amount", "Metallic amount", "AO amount", "Specular amount" };
+	static const char *amountLabels[] = { "Albedo %", "Roughness %", "Metallic %", "AO %", "Specular %" };
 	int count = 0, current[NMAP_SLOT_COUNT], i, j, value, *a;
 
 	XCALL_INIT;
@@ -853,12 +854,24 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 	projection = POPUP_CTL(panl, pan, "Projection", projNames);
 	tileX = INT_CTL(panl, pan, "Tile X %");
 	tileY = INT_CTL(panl, pan, "Tile Y %");
-	strength = SLIDER_CTL(panl, pan, "Normal strength", 150, 0, 100);
-	flipY = BOOL_CTL(panl, pan, "Flip normal Y (DirectX)");
-	sharpness = SLIDER_CTL(panl, pan, "Box blend sharpness", 150, 1, 8);
+	strength = SLIDER_CTL(panl, pan, "Normal strength", 100, 0, 100);
+	flipY = BOOL_CTL(panl, pan, "Flip Y (DirectX)");
+	sharpness = SLIDER_CTL(panl, pan, "Box sharpness", 100, 1, 8);
 	albedoMode = POPUP_CTL(panl, pan, "Albedo mode", albedoModeNames);
 	for (i = NMAP_SLOT_ALBEDO; i < NMAP_SLOT_COUNT; i++)
-		amount[i] = SLIDER_CTL(panl, pan, (char *)amountLabels[i - NMAP_SLOT_ALBEDO], 150, 0, 100);
+		amount[i] = SLIDER_CTL(panl, pan, (char *)amountLabels[i - NMAP_SLOT_ALBEDO], 100, 0, 100);
+	{
+		/* Left: image slots and projection; right: albedo mode and the
+		 * material map amounts. */
+		LWControl *col[NMAP_SLOT_COUNT + 6 + NMAP_SLOT_COUNT];
+		int n = 0;
+		for (i = 0; i < NMAP_SLOT_COUNT; i++) col[n++] = image[i];
+		col[n++] = projection; col[n++] = tileX; col[n++] = tileY;
+		col[n++] = strength; col[n++] = flipY; col[n++] = sharpness;
+		col[n++] = albedoMode;
+		for (i = NMAP_SLOT_ALBEDO; i < NMAP_SLOT_COUNT; i++) col[n++] = amount[i];
+		pl_columns(panl, pan, col, 0, n, NMAP_SLOT_COUNT + 6);
+	}
 	for (i = 0; i < NMAP_SLOT_COUNT; i++) SET_INT(image[i], current[i]);
 	SET_INT(projection, inst->projection);
 	SET_INT(tileX, inst->tileX);

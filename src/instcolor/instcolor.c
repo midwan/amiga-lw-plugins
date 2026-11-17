@@ -5,6 +5,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <proto/exec.h>
@@ -367,6 +368,10 @@ Interface(long version, GlobalFunc *global, InstanceColor *instance, void *serve
 	saturation = SLIDER_CTL(panels, panel, "Saturation range +/-", 160, 0, 100);
 	value = SLIDER_CTL(panels, panel, "Value range +/-", 160, 0, 100);
 	mode = POPUP_CTL(panels, panel, "Colour mode", modeNames);
+	{
+		LWControl *col[] = { polygons, seed, hue, saturation, value, mode };
+		pl_columns(panels, panel, col, 0, 6, 6);
+	}
 	SET_INT(polygons, instance->polygonsPerInstance);
 	SET_INT(seed, instance->seed);
 	SET_INT(hue, instance->hueRange);

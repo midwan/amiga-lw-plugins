@@ -989,37 +989,6 @@ Evaluate(ObjMeshSwapInst *inst, ObjReplacementAccess *oa)
  * Interface
  * ---------------------------------------------------------------- */
 
-static ObjMeshSwapInst *ui_inst;
-static char           ui_buf[80];
-
-static int
-ui_entryCount(void *data)
-{
-	(void)data;
-	return ui_inst ? ui_inst->numEntries : 0;
-}
-
-static char *
-ui_entryName(void *data, int idx)
-{
-	char numBuf[12];
-	int  len;
-
-	(void)data;
-	if (!ui_inst || idx < 0 || idx >= ui_inst->numEntries)
-		return "";
-
-	/* Build "Frame NNN: filename" without sprintf */
-	strcpy(ui_buf, "Frame ");
-	int_to_str(ui_inst->entries[idx].frame, numBuf, sizeof(numBuf));
-	strcat(ui_buf, numBuf);
-	strcat(ui_buf, ": ");
-	len = strlen(ui_buf);
-	spi_copy_string(ui_buf + len, (int)(sizeof(ui_buf) - len),
-	                ui_inst->entries[idx].filename);
-	return ui_buf;
-}
-
 XCALL_(static int)
 Interface(
 	long           version,
@@ -1029,7 +998,7 @@ Interface(
 {
 	LWPanelFuncs *panl;
 	LWPanelID     pan;
-	LWControl    *listCtl, *infoCtl;
+	LWControl    *infoCtl;
 	const char   *infoLines[3];
 	char         *infoBuf = inst->messageBuf;
 	char         *numBuf = inst->numberBuf;
@@ -1080,19 +1049,8 @@ Interface(
 		infoCtl = TEXT_CTL(panl, pan, "", infoLines);
 		(void)infoCtl;
 
-		if (inst->numEntries > 0) {
-			ui_inst = inst;
-			listCtl = LISTBOX_CTL(panl, pan, "Replacements",
-			                      400,
-			                      inst->numEntries < 15
-			                        ? inst->numEntries : 15,
-			                      ui_entryName, ui_entryCount);
-			(void)listCtl;
-		}
-
 		(*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL);
 		PAN_KILL(panl, pan);
-		ui_inst = 0;
 		return AFUNC_OK;
 	}
 

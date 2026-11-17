@@ -9,6 +9,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 
 #include <string.h>
@@ -591,14 +592,22 @@ Interface(long version, GlobalFunc *global, ToonShaderInst *inst, void *serverDa
 		outline = BOOL_CTL(panl, pan, "Outline");
 		width = SLIDER_CTL(panl, pan, "Edge Width", 150, 1, 100);
 		geometric = BOOL_CTL(panl, pan, "Use Geometric Normal");
-		outlineColor = RGB_CTL(panl, pan, "Edge Colour");
+		outlineColor = MINIRGB_CTL(panl, pan, "Edge Colour");
 		highlight = BOOL_CTL(panl, pan, "Highlight");
 		highlightSize = SLIDER_CTL(panl, pan, "Highlight Size", 150, 0, 100);
 		highlightIntensity = SLIDER_CTL(panl, pan, "Highlight Intensity", 150, 0, 100);
-		highlightColor = RGB_CTL(panl, pan, "Highlight Colour");
+		highlightColor = MINIRGB_CTL(panl, pan, "Highlight Colour");
 		rimAmount = SLIDER_CTL(panl, pan, "Rim Amount", 150, 0, 100);
-		rimColor = RGB_CTL(panl, pan, "Rim Colour");
-		shadowColor = RGB_CTL(panl, pan, "Shadow Colour");
+		rimColor = MINIRGB_CTL(panl, pan, "Rim Colour");
+		shadowColor = MINIRGB_CTL(panl, pan, "Shadow Colour");
+		{
+			/* One column: the compact colour controls keep it short. */
+			LWControl *col[] = { bands, softness, outline, width, geometric,
+			                     outlineColor, highlight, highlightSize,
+			                     highlightIntensity, highlightColor, rimAmount,
+			                     rimColor, shadowColor };
+			pl_columns(panl, pan, col, 0, 13, 13);
+		}
 
 		SET_INT(bands, inst->bands); SET_INT(softness, inst->softness);
 		SET_INT(outline, inst->outlineEnabled); SET_INT(width, inst->outlineWidth);

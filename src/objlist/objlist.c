@@ -9,6 +9,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 #include <quiet_dos.h>
 
@@ -459,23 +460,39 @@ static ObjListInst *uiInst;
 static GlobalFunc *uiGlobal;
 static LWControl *uiPathControl;
 static LWControl *uiInfoControl;
-static LWControl *uiListControl;
 static char uiPath[MAX_PATH];
 static char uiDir[MAX_PATH];
 static char uiName[MAX_PATH];
 static char uiFullName[MAX_PATH];
 static char uiOriginalPath[MAX_PATH];
 static char uiInfo[96];
-static char uiEntry[80];
 static const char *uiInfoLines[2];
-static LWValue uiStringValue = { LWT_STRING };
+/* The path is shown as text: the read-only string control (InfoControl)
+ * reports a width of about 900 pixels, which widens the panel past a
+ * 640-pixel screen whatever PAN_W or CTL_W is set to. The text keeps its
+ * width when the path changes, so long paths show their tail. */
+#define UI_PATH_SHOWN 48
+static char uiPathShown[UI_PATH_SHOWN + 1];
+static const char *uiPathLines[2];
 
 static void
-set_ui_path(void)
+update_ui_path(void)
 {
-	uiStringValue.str.buf = uiPath;
-	uiStringValue.str.bufLen = sizeof(uiPath);
-	(*uiPathControl->set)(uiPathControl, CTL_VALUE, &uiStringValue);
+	int len = (int)strlen(uiPath), pos;
+
+	if (len == 0) {
+		strcpy(uiPathShown, "(none)");
+	} else if (len > UI_PATH_SHOWN) {
+		strcpy(uiPathShown, "...");
+		strcat(uiPathShown, uiPath + len - (UI_PATH_SHOWN - 3));
+	} else {
+		strcpy(uiPathShown, uiPath);
+	}
+	for (pos = (int)strlen(uiPathShown); pos < UI_PATH_SHOWN; pos++)
+		uiPathShown[pos] = ' ';
+	uiPathShown[UI_PATH_SHOWN] = '\0';
+	uiPathLines[0] = uiPathShown;
+	uiPathLines[1] = 0;
 }
 
 
@@ -495,31 +512,6 @@ update_ui_info(void)
 	}
 	uiInfoLines[0] = uiInfo;
 	uiInfoLines[1] = 0;
-}
-
-static int
-ui_entry_count(void *data)
-{
-	(void)data;
-	return uiInst ? uiInst->numEntries : 0;
-}
-
-static char *
-ui_entry_name(void *data, int index)
-{
-	char number[12];
-	int len;
-
-	(void)data;
-	if (!uiInst || index < 0 || index >= uiInst->numEntries) return "";
-	strcpy(uiEntry, "Frame ");
-	int_to_str(uiInst->entries[index].frame, number, sizeof(number));
-	strcat(uiEntry, number);
-	strcat(uiEntry, " -> ");
-	len = strlen(uiEntry);
-	spi_copy_string(uiEntry + len, (int)(sizeof(uiEntry) - len),
-	                uiInst->entries[index].filename);
-	return uiEntry;
 }
 
 static void
@@ -556,10 +548,9 @@ pick_list(LWControlID control, void *data)
 	set_list_path(uiInst, uiFullName);
 	copy_path(uiPath, uiInst->listPath);
 	update_ui_info();
-	set_ui_path();
+	update_ui_path();
 	REDRAW_CON(uiPathControl);
 	REDRAW_CON(uiInfoControl);
-	REDRAW_CON(uiListControl);
 }
 
 XCALL_(static int)
@@ -582,6 +573,7 @@ Interface(long version, GlobalFunc *global, ObjListInst *inst, void *serverData)
 	uiGlobal = global;
 	copy_path(uiOriginalPath, inst->listPath);
 	copy_path(uiPath, inst->listPath);
+	update_ui_path();
 	update_ui_info();
 	panel = PAN_CREATE(panelFuncs, "ObjList v" PLUGIN_VERSION);
 	if (!panel) {
@@ -589,13 +581,14 @@ Interface(long version, GlobalFunc *global, ObjListInst *inst, void *serverData)
 		return AFUNC_BADLOCAL;
 	}
 	panelFuncs->globalFun = global;
-	uiPathControl = STRRO_CTL(panelFuncs, panel, "List file", 50);
-	set_ui_path();
+	uiPathControl = TEXT_CTL(panelFuncs, panel, "List file", uiPathLines);
 	pickControl = BUTTON_CTL(panelFuncs, panel, "Pick List...");
 	CON_SETEVENT(pickControl, pick_list, 0);
 	uiInfoControl = TEXT_CTL(panelFuncs, panel, "", uiInfoLines);
-	uiListControl = LISTBOX_CTL(panelFuncs, panel, "Frame -> file", 400, 12,
-	                            ui_entry_name, ui_entry_count);
+	{
+		LWControl *col[] = { uiPathControl, pickControl, uiInfoControl };
+		pl_columns(panelFuncs, panel, col, 0, 3, 3);
+	}
 	accepted = (*panelFuncs->open)(panel, PANF_BLOCKING | PANF_CANCEL);
 	if (!accepted)
 		set_list_path(inst, uiOriginalPath);

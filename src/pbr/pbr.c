@@ -11,6 +11,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <lwmath.h>
 #include <safe_pluginio.h>
 #include <trig_approx.h>
@@ -814,39 +815,6 @@ static LWPanControlDesc desc;
 static LWValue ival = { LWT_INTEGER };
 static LWValue fval = { LWT_FLOAT };
 
-/* The CON_* macros all return the shared ival, so two of them in one
- * expression read the same value; this returns a copy instead. */
-static int
-con_get(LWControl *ctl, int tag)
-{
-	(*ctl->get)(ctl, tag, &ival);
-	return ival.intv.value;
-}
-
-/* LWPanels stacks the controls in one column with left-aligned labels.
- * Right-align the labels so every field, slider, popup and check box
- * starts at the same x, then fit the panel width to the column. */
-static void
-align_panel(LWPanelFuncs *panl, LWPanelID pan)
-{
-	int i, x, y, label, hot = 0, right = 0, edge, margin;
-
-	margin = con_get(panelCon[0], CTL_X);
-	for (i = 0; i < PC_COUNT; i++) {
-		label = con_get(panelCon[i], CTL_HOTX) - con_get(panelCon[i], CTL_X);
-		if (label > hot) hot = label;
-	}
-	for (i = 0; i < PC_COUNT; i++) {
-		label = con_get(panelCon[i], CTL_HOTX) - con_get(panelCon[i], CTL_X);
-		x = margin + hot - label;
-		y = con_get(panelCon[i], CTL_Y);
-		MOVE_CON(panelCon[i], x, y);
-		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
-		if (edge > right) right = edge;
-	}
-	PAN_SETW(panl, pan, right + margin);
-}
-
 XCALL_(static int)
 Interface(
 	long       version,
@@ -881,7 +849,7 @@ Interface(
 		c[PC_BLUR_AMT]  = SLIDER_CTL(panl, pan, "Blur Spread", 150, 0, 100);
 		c[PC_ENV_EN]    = BOOL_CTL(panl, pan, "Env Light");
 		c[PC_ENV_STR]   = SLIDER_CTL(panl, pan, "Env Strength", 150, 0, 100);
-		align_panel(panl, pan);
+		pl_columns(panl, pan, panelCon, 0, PC_COUNT, PC_COUNT);
 
 		/* Set values */
 		SET_FLOAT(c[PC_IOR], inst->ior);
