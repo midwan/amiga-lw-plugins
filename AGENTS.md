@@ -513,9 +513,11 @@ applies the panel limits after every load.
   basis around R; sample i in the equal-area ring sqrt(i/n)..sqrt((i+1)/n) at a
   golden-angle step, pattern rotated and ring offset per point via hash3d(oPos).
   Rays pointing under the surface are mirrored back above it. Spread 0 traces one ray
-- `compose_blur()` runs last: lights the surface itself (`LW Light Info`
-  ambient + `illuminate()` per light from `LW Item Info`), writes the
-  finished colour with luminous 1, diffuse 0, mirror 0. LightWave adds specular
+- `compose_blur()` runs last: lights the surface itself (ambient from
+  `LW Light Info 2`, or `LW Light Info` on 5.00r, plus `illuminate()` per
+  light from `LW Item Info`; with Light Info 2, lights flagged
+  `LWLFL_NO_DIFFUSE` are skipped), writes the finished colour with
+  luminous 1, diffuse 0, mirror 0. LightWave adds specular
 - Spread 0 matches the native mirror render except for ~50 silhouette pixels
   (Generic and 040fpu identical)
 - Flags: LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_DIFFUSE | LWSHF_MIRROR | LWSHF_RAYTRACE

@@ -135,6 +135,7 @@ typedef struct {
 	/* Render-time globals for blurred reflections (Init/Cleanup) */
 	LWItemInfo  *itemInfo;
 	LWLightInfo *lightInfo;
+	int          lightInfoV2;	/* flags() exists only in LW Light Info 2 */
 	LWTime       time;
 } PBRInst;
 
@@ -375,6 +376,7 @@ Copy(PBRInst *from, PBRInst *to)
 	/* Animation globals belong to Init/Cleanup on each instance. */
 	to->itemInfo = 0;
 	to->lightInfo = 0;
+	to->lightInfoV2 = 0;
 	return 0;
 }
 
@@ -492,9 +494,16 @@ Init(PBRInst *inst)
 	compute_f0(inst);
 	inst->itemInfo = 0;
 	inst->lightInfo = 0;
+	inst->lightInfoV2 = 0;
 	if (gfunc) {
 		inst->itemInfo = (LWItemInfo *)(*gfunc)("LW Item Info", GFUSE_ACQUIRE);
-		inst->lightInfo = (LWLightInfo *)(*gfunc)("LW Light Info", GFUSE_ACQUIRE);
+		/* LW 5.5+ adds flags and range in LW Light Info 2; 5.00r only has
+		 * the older global, whose struct ends before flags. */
+		inst->lightInfo = (LWLightInfo *)(*gfunc)("LW Light Info 2", GFUSE_ACQUIRE);
+		if (inst->lightInfo)
+			inst->lightInfoV2 = 1;
+		else
+			inst->lightInfo = (LWLightInfo *)(*gfunc)("LW Light Info", GFUSE_ACQUIRE);
 	}
 	return 0;
 }
@@ -506,9 +515,11 @@ Cleanup(PBRInst *inst)
 	if (inst->itemInfo && gfunc)
 		(*gfunc)("LW Item Info", GFUSE_RELEASE);
 	if (inst->lightInfo && gfunc)
-		(*gfunc)("LW Light Info", GFUSE_RELEASE);
+		(*gfunc)(inst->lightInfoV2 ? "LW Light Info 2" : "LW Light Info",
+		         GFUSE_RELEASE);
 	inst->itemInfo = 0;
 	inst->lightInfo = 0;
+	inst->lightInfoV2 = 0;
 }
 
 XCALL_(static LWError)
@@ -665,6 +676,9 @@ compose_blur(PBRInst *inst, ShaderAccess *sa)
 	blur_trace_depth++;
 	for (light = (*inst->itemInfo->first)(LWI_LIGHT, LWITEM_NULL); light;
 	     light = (*inst->itemInfo->next)(light)) {
+		if (inst->lightInfoV2
+		    && ((*inst->lightInfo->flags)(light) & LWLFL_NO_DIFFUSE))
+			continue;
 		if (!(*sa->illuminate)(light, sa->wPos, blur.dir, blur.col))
 			continue;
 		len = sqrt(dot3(blur.dir, blur.dir));
