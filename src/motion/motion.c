@@ -17,6 +17,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 #include <trig_approx.h>
 
@@ -528,9 +529,13 @@ Interface(
 		                       " (c) D. Panokostas");
 		if (!pan) return AFUNC_OK;
 
+		/* Left column: mode and timing; right: what moves. Controls are
+		 * created column by column so each column stacks without gaps. */
 		ctlMode  = POPUP_CTL(panl, pan, "Mode", modeItems);
 		ctlFreq  = INT_CTL(panl, pan, "Speed (x10 Hz)");
 		ctlOctaves = POPUP_CTL(panl, pan, "Octaves", octaveItems);
+		ctlShakeStart = INT_CTL(panl, pan, "Shake Start Fr");
+		ctlDecay = SLIDER_CTL(panl, pan, "Shake Decay", 150, 0, 100);
 		ctlPos   = BOOL_CTL(panl, pan, "Affect Position");
 		ctlAmpX  = INT_CTL(panl, pan, "Pos Amp X");
 		ctlAmpY  = INT_CTL(panl, pan, "Pos Amp Y");
@@ -539,8 +544,12 @@ Interface(
 		ctlRotX  = INT_CTL(panl, pan, "Rot Amp H");
 		ctlRotY  = INT_CTL(panl, pan, "Rot Amp P");
 		ctlRotZ  = INT_CTL(panl, pan, "Rot Amp B");
-		ctlShakeStart = INT_CTL(panl, pan, "Shake Start Fr");
-		ctlDecay = SLIDER_CTL(panl, pan, "Shake Decay", 150, 0, 100);
+		{
+			LWControl *col[] = { ctlMode, ctlFreq, ctlOctaves, ctlShakeStart,
+			                     ctlDecay, ctlPos, ctlAmpX, ctlAmpY, ctlAmpZ,
+			                     ctlRot, ctlRotX, ctlRotY, ctlRotZ };
+			pl_columns(panl, pan, col, 0, 13, 5);
+		}
 
 		SET_INT(ctlMode, inst->mode);
 		SET_INT(ctlFreq, inst->frequency);

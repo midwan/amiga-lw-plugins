@@ -431,20 +431,35 @@ Panel facts measured with the `lwpanels.p` shipped with LightwaveRTG:
 
 - `TABCHOICE_CTL` is LWPanels API v16 (1998). Neither LightwaveRTG's
   `lwpanels.p` nor the February 1997 one registers `TabChoiceControl` (or
-  the v14 `BorderControl`), so there is no native tab control.
+  the v14 `BorderControl`), so there is no native tab control. The v14
+  `ListBoxControl` (`LISTBOX_CTL`) is missing too: `addControl` returns
+  NULL, so ObjList, ObjSwap and ObjMeshSwap never showed their lists, and
+  ObjList's Pick List redrew the NULL control. Use `TEXT_CTL` lines.
+  `MINIRGB_CTL` (swatch plus R/G/B fields) exists and is much shorter than
+  `RGB_CTL` (three sliders).
 - `PAN_GETVERSION` returns 0, which the SDK docs define as older than the
   API that added `PAN_VERSION` (September 1996). Don't assume any feature
   the header marks with an API version.
 - Controls stack in one column, labels left-aligned. A long panel runs off
   the Layout screen: the 25-row PostFilter panel was about 890 pixels tall.
-  Arrange the controls in columns with `MOVE_CON`, then `PAN_SETW`/`PAN_SETH`.
-  To line up sliders, move each control so that `CTL_HOTX` (the start of
-  the slider or popup) is the same in a column; labels then end right-aligned.
+  Lay every panel out with `pl_columns()` from `sdk/include/panel_layout.h`
+  (include it after `lwpanel.h`, which has no include guard): it moves each
+  control so `CTL_HOTX` (the start of the field, slider or popup) is the
+  same in a column, so labels end right-aligned, and sizes the panel. For
+  two columns, create the controls column by column: each column keeps the
+  auto-placed row spacing of its controls. Keep panels within about
+  640x480.
+- `STR_CTL`, `STRRO_CTL` and `FILE_CTL` widths are visible characters (8
+  pixels each), not the string length: `FILE_CTL(..., 300)` made SurfList's
+  panel wider than a 1280-pixel screen, and a 40-character field still
+  keeps a 76-character path. `STRRO_CTL` (InfoControl) reports a width of
+  about 900 pixels whatever its size, and setting `PAN_W` or `CTL_W` does
+  not shrink the panel; show read-only text with `TEXT_CTL` (ObjList).
 - `CON_X`, `CON_Y`, `CON_W`, `CON_H` and the other `CON_*` getters all
   return the shared `ival`. Two of them in one expression
   (`CON_X(a) + CON_W(a)`, `CON_Y(a) - CON_Y(b)`) read the same value.
   Read each one in its own statement or through a function that returns
-  a copy (`con_get()` in `postfilter.c`).
+  a copy (`pl_get()` in `panel_layout.h`).
 - Control events (`CON_SETEVENT`) work. `GHOST_CON`/`RENDER_CON` called from
   one grey out a control and restore it, and a ghosted slider ignores clicks.
 - Panel hooks are unsafe. A `PAN_USERDRAW` hook that called `GHOST_CON`

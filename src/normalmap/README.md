@@ -14,7 +14,7 @@ NormalMap projects a normal map and optional PBR-style material maps from object
 2. Open **NormalMap Options** for the surface and select the images from their individual dropdowns. `(None)` disables a slot.
 3. Choose an axis projection for a flat surface, or **Triplanar (box)** for automatic seamless projection over several faces.
 4. Set tile values once. They apply to every slot, which keeps the source map set registered.
-5. Choose an Albedo mode and adjust each map amount. Render after changing image selections; the shader prepares its image copies when Layout initializes the surface.
+5. Choose an Albedo mode and adjust each map's % slider. Render after changing image selections; the shader prepares its image copies when Layout initializes the surface.
 
 ## Settings
 
@@ -24,15 +24,15 @@ NormalMap projects a normal map and optional PBR-style material maps from object
 | Albedo / Colour | Image list / None | None | RGB base colour map. Replace blends toward the map; Multiply scales the existing surface colour. |
 | Roughness | Image list / None | None | Sets glossiness from map luminance: black is glossy (tight highlight) and white is rough (broad highlight). Converted to LightWave's `roughness` field, which is the reciprocal of the glossiness exponent. |
 | Metallic | Image list / None | None | Uses map luminance with the same Schlick-angle scalar treatment as PBR: it raises mirror and specular and reduces diffuse. |
-| Ambient occlusion | Image list / None | None | Darkens surface colour and diffuse by map luminance. White is unoccluded. |
+| AO | Image list / None | None | Ambient occlusion map. Darkens surface colour and diffuse by map luminance. White is unoccluded. |
 | Specular | Image list / None | None | Sets `ShaderAccess.specular` from map luminance. |
 | Projection | XY / XZ / YZ / Triplanar (box) | XY | Common projection for all slots. |
 | Tile X %, Tile Y % | 1–10000 | 100 | Common repeat factors; 100 is one repeat. |
 | Normal strength | 0–100 | 100 | Blend from the unmodified normal to the normal-map result. |
-| Flip normal Y | on/off | off | Use for DirectX-convention normal maps. |
-| Box blend sharpness | 1–8 | 2 | Higher values retain each box face longer; lower values soften transitions. Applies only in Triplanar mode. |
+| Flip Y (DirectX) | on/off | off | Flips the normal map's Y channel. Use for DirectX-convention normal maps. |
+| Box sharpness | 1–8 | 2 | Higher values retain each box face longer; lower values soften transitions. Applies only in Triplanar mode. |
 | Albedo mode | Multiply / Replace | Replace | How the Albedo map combines with the surface's existing colour. |
-| Map amounts | 0–100 | 100 | Per-map influence for Albedo, Roughness, Metallic, AO, and Specular. |
+| Albedo %, Roughness %, Metallic %, AO %, Specular % | 0–100 | 100 | Per-map influence. |
 
 Single-channel maps are read as Rec. 709 luminance (`0.2126 R + 0.7152 G + 0.0722 B`). Grayscale images therefore work without conversion; a red-only map is also usable, but its luminance is lower than the red value.
 

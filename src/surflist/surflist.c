@@ -9,6 +9,7 @@
 #include <splug.h>
 #include <lwran.h>
 #include <lwpanel.h>
+#include <panel_layout.h>
 #include <safe_pluginio.h>
 #include <quiet_dos.h>
 
@@ -580,12 +581,15 @@ Interface(long version, GlobalFunc *global, SurfListInst *inst, void *serverData
 	if (!pan) return AFUNC_BADGLOBAL;
 	/* the file control needs this to reach the file requester */
 	panl->globalFun = global;
-	pathCtl = FILE_CTL(panl, pan, "List file", 300);
+	pathCtl = FILE_CTL(panl, pan, "List file", 40);
 	status_text(inst, uiStatus, sizeof(uiStatus));
 	uiLines[0] = uiStatus;
 	uiLines[1] = 0;
 	infoCtl = TEXT_CTL(panl, pan, "", uiLines);
-	(void)infoCtl;
+	{
+		LWControl *col[] = { pathCtl, infoCtl };
+		pl_columns(panl, pan, col, 0, 2, 2);
+	}
 	strcpy(uiPath, inst->listPath);
 	SET_STR(pathCtl, uiPath, sizeof(uiPath));
 	if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
