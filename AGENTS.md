@@ -498,13 +498,27 @@ scenes with metallic=1 auto-convert to 100 on load). `clamp_settings()`
 applies the panel limits after every load.
 
 ### Blurred Reflections
-- Reflection direction: R = V - 2*dot(V,N)*N where V = normalize(wPos - raySource)
-- Casts N rays (2/4/8, capped at 8) via sa->rayTrace() in a cone around R, only for
-  primary evaluations (`blur_trace_depth` guard; rayTrace re-enters the shader)
-- Cone spread: blurReflAmount / 200.0 (independent of roughness), perturbed via hash3d with per-sample seeds
-- Averages returned colors, blends into sa->color weighted by sa->mirror
-- Sets sa->mirror = 0 to prevent LW doubling the reflection
-- Flags: LWSHF_COLOR | LWSHF_MIRROR | LWSHF_RAYTRACE
+- LightWave 5.00r shades `colour * (luminous + diffuse * (ambient + sum of
+  light * N.L)) + specular + mirror * reflection`: the mirror term is added
+  after lighting, not mixed, and specular is not scaled by mirror (native
+  probe renders, issue #38). Ambient is `AmbientColor * AmbIntensity` and
+  goes through diffuse. With Color Highlights on, LightWave also tints the
+  reflection with the surface colour; shaders cannot read that flag.
+- Reflection direction: R = V - 2*dot(V,N)*N, V = normalize(wPos - raySource),
+  N = wNorm turned toward the viewer
+- Casts N rays (2/4/8/16, `BLUR_MAX_SAMPLES`) via sa->rayTrace(), only for
+  primary evaluations (`blur_trace_depth` guard; rayTrace re-enters the shader,
+  and the guard also wraps the `illuminate()` loop)
+- Samples: disk of radius blurReflAmount / 200 (tangent of the cone angle) in a
+  basis around R; sample i in the equal-area ring sqrt(i/n)..sqrt((i+1)/n) at a
+  golden-angle step, pattern rotated and ring offset per point via hash3d(oPos).
+  Rays pointing under the surface are mirrored back above it. Spread 0 traces one ray
+- `compose_blur()` runs last: lights the surface itself (`LW Light Info`
+  ambient + `illuminate()` per light from `LW Item Info`), writes the
+  finished colour with luminous 1, diffuse 0, mirror 0. LightWave adds specular
+- Spread 0 matches the native mirror render except for ~50 silhouette pixels
+  (Generic and 040fpu identical)
+- Flags: LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_DIFFUSE | LWSHF_MIRROR | LWSHF_RAYTRACE
 
 ### Environment Light
 - No rays: a normal-based ambient boost, (0.3 + 0.7 * max(N.y, 0)) * envStrength/100
