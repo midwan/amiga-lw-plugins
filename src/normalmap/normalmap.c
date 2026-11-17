@@ -862,8 +862,9 @@ XCALL_(static int) Interface(long version, GlobalFunc *global, NormalMapInst *in
 		amount[i] = SLIDER_CTL(panl, pan, (char *)amountLabels[i - NMAP_SLOT_ALBEDO], 100, 0, 100);
 	{
 		/* Left: image slots and projection; right: albedo mode and the
-		 * material map amounts. */
-		LWControl *col[NMAP_SLOT_COUNT + 6 + NMAP_SLOT_COUNT];
+		 * material map amounts. Static like the popup tables: 72 bytes
+		 * is too much for the callback stack. */
+		static LWControl *col[NMAP_SLOT_COUNT + 6 + NMAP_SLOT_COUNT];
 		int n = 0;
 		for (i = 0; i < NMAP_SLOT_COUNT; i++) col[n++] = image[i];
 		col[n++] = projection; col[n++] = tileX; col[n++] = tileY;
