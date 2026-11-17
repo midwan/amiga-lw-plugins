@@ -427,6 +427,20 @@ Available control macros: `INT_CTL`, `FLOAT_CTL`, `STR_CTL`, `BOOL_CTL`, `RGB_CT
 `CANVAS_CTL`, `CUSTPOPUP_CTL`, `ITEM_CTL`, `LISTBOX_CTL`, `PERCENT_CTL`,
 `TABCHOICE_CTL`, `BORDER_CTL`, `DRAGBUT_CTL`, etc.
 
+Panel facts measured with the `lwpanels.p` shipped with LightwaveRTG:
+
+- `TABCHOICE_CTL` is LWPanels API v16 (1998). Neither LightwaveRTG's
+  `lwpanels.p` nor the February 1997 one registers `TabChoiceControl` (or
+  the v14 `BorderControl`), so there is no native tab control.
+- Controls stack in one column, labels left-aligned. A long panel runs off
+  the Layout screen: the 25-row PostFilter panel was about 890 pixels tall.
+  Arrange the controls in columns with `MOVE_CON`, then `PAN_SETW`/`PAN_SETH`.
+- `CON_X`, `CON_Y`, `CON_W`, `CON_H` and the other `CON_*` getters all
+  return the shared `ival`. Two of them in one expression
+  (`CON_X(a) + CON_W(a)`, `CON_Y(a) - CON_Y(b)`) read the same value.
+  Read each one in its own statement or through a function that returns
+  a copy (`con_get()` in `postfilter.c`).
+
 ---
 
 ## 5.x SDK Changes from 4.0
