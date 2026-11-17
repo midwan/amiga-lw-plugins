@@ -13,6 +13,7 @@
 #include <lwpanel.h>
 #include <lwmath.h>
 #include <safe_pluginio.h>
+#include <trig_approx.h>
 
 #include <string.h>
 
@@ -124,12 +125,17 @@ typedef struct {
 
 	/* Blurred Reflections */
 	int    blurReflEnabled;
-	int    blurReflSamples;  /* 2, 4, or 8 */
+	int    blurReflSamples;  /* 2, 4, 8 or 16 */
 	int    blurReflAmount;   /* 0-100 cone spread */
 
 	/* Environment Light */
 	int    envEnabled;
 	int    envStrength;      /* 0-100 */
+
+	/* Render-time globals for blurred reflections (Init/Cleanup) */
+	LWItemInfo  *itemInfo;
+	LWLightInfo *lightInfo;
+	LWTime       time;
 } PBRInst;
 
 #define PBR_SCENE_VERSION  2
@@ -140,11 +146,31 @@ typedef struct {
  * ---------------------------------------------------------------- */
 
 static MessageFuncs *msg;
+static GlobalFunc   *gfunc;
 
 static double pow5_lut[101];
 static int pow5_ready = 0;
 /* sa->rayTrace can re-enter PBR on the ray hit; blur cones stay primary-only. */
 static int blur_trace_depth = 0;
+
+#define BLUR_MAX_SAMPLES 16
+
+/* Unit-disk directions at golden-angle steps, filled in Create(). */
+static double blur_disk[BLUR_MAX_SAMPLES][2];
+
+/*
+ * Blurred reflection working data. Kept off the stack because rayTrace
+ * re-enters Evaluate for the surface the ray hits; only the primary
+ * evaluation (blur_trace_depth == 0) uses it.
+ */
+static struct {
+	double n[3];         /* normal facing the viewer */
+	double refl[3];      /* mirror direction */
+	double t[3], b[3];   /* basis around refl */
+	double pos[3], dir[3], col[3];
+	double sum[3];       /* averaged reflected colour */
+	double light[3];     /* ambient + direct light reaching the point */
+} blur;
 
 /* ----------------------------------------------------------------
  * Precompute F0 from IOR
@@ -172,7 +198,8 @@ clamp_settings(PBRInst *inst)
 	if (inst->aoStrength < 0) inst->aoStrength = 0;
 	if (inst->aoStrength > 100) inst->aoStrength = 100;
 	if (inst->blurReflSamples < 0) inst->blurReflSamples = 0;
-	if (inst->blurReflSamples > 8) inst->blurReflSamples = 8;
+	if (inst->blurReflSamples > BLUR_MAX_SAMPLES)
+		inst->blurReflSamples = BLUR_MAX_SAMPLES;
 	if (inst->blurReflAmount < 0) inst->blurReflAmount = 0;
 	if (inst->blurReflAmount > 100) inst->blurReflAmount = 100;
 	if (inst->envStrength < 0) inst->envStrength = 0;
@@ -322,6 +349,11 @@ Create(LWError *err)
 			double t = j / 100.0;
 			pow5_lut[j] = t * t * t * t * t;
 		}
+		for (j = 0; j < BLUR_MAX_SAMPLES; j++) {
+			double a = j * 2.399963229728653;	/* golden angle */
+			blur_disk[j][0] = cos_approx(a);
+			blur_disk[j][1] = sin_approx(a);
+		}
 		pow5_ready = 1;
 	}
 
@@ -340,6 +372,9 @@ Copy(PBRInst *from, PBRInst *to)
 {
 	XCALL_INIT;
 	*to = *from;
+	/* Animation globals belong to Init/Cleanup on each instance. */
+	to->itemInfo = 0;
+	to->lightInfo = 0;
 	return 0;
 }
 
@@ -455,16 +490,32 @@ Init(PBRInst *inst)
 {
 	XCALL_INIT;
 	compute_f0(inst);
+	inst->itemInfo = 0;
+	inst->lightInfo = 0;
+	if (gfunc) {
+		inst->itemInfo = (LWItemInfo *)(*gfunc)("LW Item Info", GFUSE_ACQUIRE);
+		inst->lightInfo = (LWLightInfo *)(*gfunc)("LW Light Info", GFUSE_ACQUIRE);
+	}
 	return 0;
 }
 
 XCALL_(static void)
-Cleanup(PBRInst *inst) { XCALL_INIT; }
+Cleanup(PBRInst *inst)
+{
+	XCALL_INIT;
+	if (inst->itemInfo && gfunc)
+		(*gfunc)("LW Item Info", GFUSE_RELEASE);
+	if (inst->lightInfo && gfunc)
+		(*gfunc)("LW Light Info", GFUSE_RELEASE);
+	inst->itemInfo = 0;
+	inst->lightInfo = 0;
+}
 
 XCALL_(static LWError)
 NewTime(PBRInst *inst, LWFrame f, LWTime t)
 {
 	XCALL_INIT;
+	inst->time = t;
 	return 0;
 }
 
@@ -484,7 +535,8 @@ Flags(PBRInst *inst)
 		f |= LWSHF_DIFFUSE | LWSHF_LUMINOUS;
 
 	if (inst->blurReflEnabled && inst->blurReflSamples > 0)
-		f |= LWSHF_COLOR | LWSHF_MIRROR | LWSHF_RAYTRACE;
+		f |= LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_DIFFUSE
+		   | LWSHF_MIRROR | LWSHF_RAYTRACE;
 
 	if (inst->envEnabled && inst->envStrength > 0)
 		f |= LWSHF_LUMINOUS | LWSHF_COLOR;
@@ -492,10 +544,158 @@ Flags(PBRInst *inst)
 	return f;
 }
 
+static double
+dot3(const double a[3], const double b[3])
+{
+	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/*
+ * Trace the blur rays and leave their average in blur.sum.
+ *
+ * The samples cover a disk of radius spread (tangent of the cone angle)
+ * around the mirror direction: sample i sits in the equal-area ring
+ * sqrt(i/n)..sqrt((i+1)/n) at a golden-angle step. Each point rotates the
+ * pattern and moves the samples within their rings, so neighbouring pixels
+ * use different rays and antialiasing passes average them.
+ */
+static void
+trace_blur(PBRInst *inst, ShaderAccess *sa)
+{
+	double d, spread, cr, sr, jit, rad, u, v;
+	int n, i, k;
+
+	n = inst->blurReflSamples;
+	if (n > BLUR_MAX_SAMPLES) n = BLUR_MAX_SAMPLES;
+	spread = inst->blurReflAmount / 200.0;
+	if (spread <= 0.0) n = 1;
+
+	for (k = 0; k < 3; k++)
+		blur.dir[k] = sa->wPos[k] - sa->raySource[k];
+	vec_normalize(blur.dir);
+
+	/* Reflect off the side that faces the viewer. */
+	d = dot3(blur.dir, sa->wNorm);
+	for (k = 0; k < 3; k++)
+		blur.n[k] = d > 0.0 ? -sa->wNorm[k] : sa->wNorm[k];
+	d = dot3(blur.dir, blur.n);
+	for (k = 0; k < 3; k++)
+		blur.refl[k] = blur.dir[k] - 2.0 * d * blur.n[k];
+	vec_normalize(blur.refl);
+
+	if (blur.refl[0] < 0.9 && blur.refl[0] > -0.9) {
+		blur.t[0] = 0.0;
+		blur.t[1] = -blur.refl[2];
+		blur.t[2] = blur.refl[1];
+	} else {
+		blur.t[0] = blur.refl[2];
+		blur.t[1] = 0.0;
+		blur.t[2] = -blur.refl[0];
+	}
+	vec_normalize(blur.t);
+	blur.b[0] = blur.refl[1] * blur.t[2] - blur.refl[2] * blur.t[1];
+	blur.b[1] = blur.refl[2] * blur.t[0] - blur.refl[0] * blur.t[2];
+	blur.b[2] = blur.refl[0] * blur.t[1] - blur.refl[1] * blur.t[0];
+
+	cr = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2], 50000u);
+	sr = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2], 60000u);
+	d = sqrt(cr * cr + sr * sr);
+	if (d < 0.001) {
+		cr = 1.0;
+		sr = 0.0;
+	} else {
+		cr /= d;
+		sr /= d;
+	}
+	jit = (hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2], 70000u) + 1.0) * 0.5;
+	if (jit < 0.0) jit = 0.0;
+	if (jit > 0.999) jit = 0.999;
+
+	for (k = 0; k < 3; k++) {
+		blur.pos[k] = sa->wPos[k] + blur.n[k] * 0.001;
+		blur.sum[k] = 0.0;
+	}
+
+	blur_trace_depth++;
+	for (i = 0; i < n; i++) {
+		rad = spread * sqrt((i + jit) / n);
+		u = (blur_disk[i][0] * cr - blur_disk[i][1] * sr) * rad;
+		v = (blur_disk[i][1] * cr + blur_disk[i][0] * sr) * rad;
+		for (k = 0; k < 3; k++)
+			blur.dir[k] = blur.refl[k] + u * blur.t[k] + v * blur.b[k];
+		vec_normalize(blur.dir);
+
+		/* A ray below the surface would hit the object itself. */
+		d = dot3(blur.dir, blur.n);
+		if (d < 0.0) {
+			for (k = 0; k < 3; k++)
+				blur.dir[k] -= 2.0 * d * blur.n[k];
+		}
+
+		blur.col[0] = blur.col[1] = blur.col[2] = 0.0;
+		(*sa->rayTrace)(blur.pos, blur.dir, blur.col);
+		for (k = 0; k < 3; k++)
+			blur.sum[k] += blur.col[k];
+	}
+	blur_trace_depth--;
+
+	for (k = 0; k < 3; k++)
+		blur.sum[k] /= n;
+}
+
+/*
+ * LightWave 5 adds the mirror reflection on top of the lit surface:
+ * colour * (luminous + diffuse * light) + specular + mirror * reflection
+ * (measured in Layout 5.00r). A shader cannot add colour after lighting,
+ * so light the surface here and hand LightWave the result as a fully
+ * luminous colour. LightWave still adds the specular highlight.
+ */
+static void
+compose_blur(PBRInst *inst, ShaderAccess *sa)
+{
+	LWItemID light;
+	double len, ndotl, v;
+	int k;
+
+	blur.light[0] = blur.light[1] = blur.light[2] = 0.0;
+	if (inst->lightInfo)
+		(*inst->lightInfo->ambient)(inst->time, blur.light);
+
+	/* Shadow rays can evaluate shaders too; keep those off blur. */
+	blur_trace_depth++;
+	for (light = (*inst->itemInfo->first)(LWI_LIGHT, LWITEM_NULL); light;
+	     light = (*inst->itemInfo->next)(light)) {
+		if (!(*sa->illuminate)(light, sa->wPos, blur.dir, blur.col))
+			continue;
+		len = sqrt(dot3(blur.dir, blur.dir));
+		if (len < 0.00001)
+			continue;
+		/* blur.dir runs from the light to the point. */
+		ndotl = -dot3(blur.dir, blur.n) / len;
+		if (ndotl <= 0.0)
+			continue;
+		for (k = 0; k < 3; k++)
+			blur.light[k] += blur.col[k] * ndotl;
+	}
+	blur_trace_depth--;
+
+	for (k = 0; k < 3; k++) {
+		v = sa->color[k] * (sa->luminous + sa->diffuse * blur.light[k])
+		  + sa->mirror * blur.sum[k];
+		if (v < 0.0) v = 0.0;
+		if (v > 1.0) v = 1.0;
+		sa->color[k] = v;
+	}
+	sa->luminous = 1.0;
+	sa->diffuse = 0.0;
+	sa->mirror = 0.0;
+}
+
 XCALL_(static void)
 Evaluate(PBRInst *inst, ShaderAccess *sa)
 {
 	double cosAngle, oneMinusCos, fresnel;
+	int blurred = 0;
 
 	XCALL_INIT;
 
@@ -551,71 +751,12 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 		sa->luminous *= aoFactor;
 	}
 
-	/* --- Blurred Reflections: cone-traced rays around reflection dir --- */
+	/* --- Blurred Reflections: replace LightWave's single mirror ray --- */
 	if (inst->blurReflEnabled && inst->blurReflSamples > 0
-	    && blur_trace_depth == 0 && sa->rayTrace && sa->mirror > 0.001) {
-		double viewDir[3], reflDir[3], dot_vn;
-		double spread, px, py, pz;
-		double dir[3], col[3], pos[3];
-		double accR = 0.0, accG = 0.0, accB = 0.0;
-		int    nSamp = inst->blurReflSamples;
-		int    validSamples = 0;
-		int    i;
-
-		if (nSamp > 8) nSamp = 8;
-		spread = inst->blurReflAmount / 200.0;
-		if (spread < 0.001) spread = 0.001;
-
-		viewDir[0] = sa->wPos[0] - sa->raySource[0];
-		viewDir[1] = sa->wPos[1] - sa->raySource[1];
-		viewDir[2] = sa->wPos[2] - sa->raySource[2];
-		vec_normalize(viewDir);
-
-		dot_vn = viewDir[0]*sa->wNorm[0] + viewDir[1]*sa->wNorm[1]
-		       + viewDir[2]*sa->wNorm[2];
-		reflDir[0] = viewDir[0] - 2.0 * dot_vn * sa->wNorm[0];
-		reflDir[1] = viewDir[1] - 2.0 * dot_vn * sa->wNorm[1];
-		reflDir[2] = viewDir[2] - 2.0 * dot_vn * sa->wNorm[2];
-		vec_normalize(reflDir);
-
-		pos[0] = sa->wPos[0] + sa->wNorm[0] * 0.001;
-		pos[1] = sa->wPos[1] + sa->wNorm[1] * 0.001;
-		pos[2] = sa->wPos[2] + sa->wNorm[2] * 0.001;
-
-		blur_trace_depth++;
-		for (i = 0; i < nSamp; i++) {
-			px = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2],
-			            50000u + (unsigned int)i * 7919u) * spread;
-			py = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2],
-			            60000u + (unsigned int)i * 6271u) * spread;
-			pz = hash3d(sa->oPos[0], sa->oPos[1], sa->oPos[2],
-			            70000u + (unsigned int)i * 5381u) * spread;
-
-			dir[0] = reflDir[0] + px;
-			dir[1] = reflDir[1] + py;
-			dir[2] = reflDir[2] + pz;
-			vec_normalize(dir);
-
-			col[0] = col[1] = col[2] = 0.0;
-			(*sa->rayTrace)(pos, dir, col);
-			accR += col[0];
-			accG += col[1];
-			accB += col[2];
-			validSamples++;
-		}
-		blur_trace_depth--;
-
-		if (validSamples > 0) {
-			double invN = 1.0 / (double)validSamples;
-			double mirrorWt = sa->mirror;
-			sa->color[0] = sa->color[0] * (1.0 - mirrorWt)
-			             + accR * invN * mirrorWt;
-			sa->color[1] = sa->color[1] * (1.0 - mirrorWt)
-			             + accG * invN * mirrorWt;
-			sa->color[2] = sa->color[2] * (1.0 - mirrorWt)
-			             + accB * invN * mirrorWt;
-			sa->mirror = 0.0;
-		}
+	    && blur_trace_depth == 0 && sa->mirror > 0.001
+	    && sa->rayTrace && sa->illuminate && inst->itemInfo) {
+		trace_blur(inst, sa);
+		blurred = 1;
 	}
 
 	/* --- Environment Light: normal-based ambient boost --- */
@@ -634,15 +775,63 @@ Evaluate(PBRInst *inst, ShaderAccess *sa)
 		if (sa->color[1] > 1.0) sa->color[1] = 1.0;
 		if (sa->color[2] > 1.0) sa->color[2] = 1.0;
 	}
+
+	/* Last, so the lighting sees the final colour, diffuse and luminous. */
+	if (blurred)
+		compose_blur(inst, sa);
 }
 
 /* ----------------------------------------------------------------
  * Interface
  * ---------------------------------------------------------------- */
 
-static const char *toggleItems[] = { "Off", "On", 0 };
-static const char *blurSampleItems[] = { "Off", "2", "4", "8", 0 };
-static int blurSampleValues[] = { 0, 2, 4, 8 };
+static const char *blurSampleItems[] = { "Off", "2", "4", "8", "16", 0 };
+static int blurSampleValues[] = { 0, 2, 4, 8, 16 };
+
+enum {
+	PC_IOR, PC_METALLIC, PC_ROUGH_EN, PC_ROUGH_AMT, PC_AO_EN, PC_AO_STR,
+	PC_BLUR_SAMP, PC_BLUR_AMT, PC_ENV_EN, PC_ENV_STR, PC_COUNT
+};
+
+/* Panel state lives in static data: the panel is modal, and the LWPanels
+ * macros need a desc and values named desc/ival/fval in scope. */
+static LWControl *panelCon[PC_COUNT];
+static LWPanControlDesc desc;
+static LWValue ival = { LWT_INTEGER };
+static LWValue fval = { LWT_FLOAT };
+
+/* The CON_* macros all return the shared ival, so two of them in one
+ * expression read the same value; this returns a copy instead. */
+static int
+con_get(LWControl *ctl, int tag)
+{
+	(*ctl->get)(ctl, tag, &ival);
+	return ival.intv.value;
+}
+
+/* LWPanels stacks the controls in one column with left-aligned labels.
+ * Right-align the labels so every field, slider, popup and check box
+ * starts at the same x, then fit the panel width to the column. */
+static void
+align_panel(LWPanelFuncs *panl, LWPanelID pan)
+{
+	int i, x, y, label, hot = 0, right = 0, edge, margin;
+
+	margin = con_get(panelCon[0], CTL_X);
+	for (i = 0; i < PC_COUNT; i++) {
+		label = con_get(panelCon[i], CTL_HOTX) - con_get(panelCon[i], CTL_X);
+		if (label > hot) hot = label;
+	}
+	for (i = 0; i < PC_COUNT; i++) {
+		label = con_get(panelCon[i], CTL_HOTX) - con_get(panelCon[i], CTL_X);
+		x = margin + hot - label;
+		y = con_get(panelCon[i], CTL_Y);
+		MOVE_CON(panelCon[i], x, y);
+		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
+		if (edge > right) right = edge;
+	}
+	PAN_SETW(panl, pan, right + margin);
+}
 
 XCALL_(static int)
 Interface(
@@ -653,12 +842,8 @@ Interface(
 {
 	LWPanelFuncs *panl;
 	LWPanelID     pan;
-	LWControl    *ctlIOR, *ctlMetallic;
-	LWControl    *ctlRoughEn, *ctlRoughAmt;
-	LWControl    *ctlAOEn, *ctlAOStr;
-	LWControl    *ctlBlurSamp, *ctlBlurAmt;
-	LWControl    *ctlEnvEn, *ctlEnvStr;
-	int           aoIdx, blurIdx, envIdx;
+	LWControl   **c = panelCon;
+	int           blurIdx;
 	char          infoBuf[80];
 
 	XCALL_INIT;
@@ -669,87 +854,50 @@ Interface(
 	panl = (LWPanelFuncs *)(*global)(PANEL_SERVICES_NAME, GFUSE_TRANSIENT);
 
 	if (panl) {
-		static LWPanControlDesc desc;
-		static LWValue ival = {LWT_INTEGER};
-		static LWValue fval = {LWT_FLOAT};
-		(void)fval;
-
 		pan = PAN_CREATE(panl, "PBR v" PLUGIN_VERSION " (c) D. Panokostas");
 		if (!pan) goto fallback;
 
-		ctlIOR      = FLOAT_CTL(panl, pan, "IOR");
-		ctlMetallic = SLIDER_CTL(panl, pan, "Metallic", 150, 0, 100);
-		ctlRoughEn  = BOOL_CTL(panl, pan, "Roughness");
-		ctlRoughAmt = INT_CTL(panl, pan, "");
-		ctlAOEn     = POPUP_CTL(panl, pan, "AO", toggleItems);
-		ctlAOStr    = SLIDER_CTL(panl, pan, "AO Strength", 150, 0, 100);
-		ctlBlurSamp = POPUP_CTL(panl, pan, "Blur Refl", blurSampleItems);
-		ctlBlurAmt  = INT_CTL(panl, pan, "Spread");
-		ctlEnvEn    = POPUP_CTL(panl, pan, "Env Light", toggleItems);
-		ctlEnvStr   = INT_CTL(panl, pan, "Strength");
-
-		{
-			int rowH, halfX, cy, cx, shift;
-			rowH = CON_H(ctlRoughEn);
-			halfX = PAN_GETW(panl, pan) / 2;
-			shift = 0;
-
-			cy = CON_Y(ctlRoughEn);
-			MOVE_CON(ctlRoughAmt, halfX, cy);
-			shift += rowH;
-
-			cy = CON_Y(ctlAOEn); cx = CON_X(ctlAOEn);
-			MOVE_CON(ctlAOEn, cx, cy - shift);
-
-			cy = CON_Y(ctlAOStr); cx = CON_X(ctlAOStr);
-			MOVE_CON(ctlAOStr, cx, cy - shift);
-
-			cy = CON_Y(ctlBlurSamp); cx = CON_X(ctlBlurSamp);
-			MOVE_CON(ctlBlurSamp, cx, cy - shift);
-			cy = CON_Y(ctlBlurSamp);
-			MOVE_CON(ctlBlurAmt, halfX, cy);
-
-			cy = CON_Y(ctlEnvEn); cx = CON_X(ctlEnvEn);
-			MOVE_CON(ctlEnvEn, cx, cy - shift);
-			cy = CON_Y(ctlEnvEn);
-			MOVE_CON(ctlEnvStr, halfX, cy);
-
-			cy = CON_Y(ctlEnvStr);
-			PAN_SETH(panl, pan, cy + 3 * rowH);
-		}
+		c[PC_IOR]       = FLOAT_CTL(panl, pan, "IOR");
+		c[PC_METALLIC]  = SLIDER_CTL(panl, pan, "Metallic", 150, 0, 100);
+		c[PC_ROUGH_EN]  = BOOL_CTL(panl, pan, "Roughness");
+		c[PC_ROUGH_AMT] = SLIDER_CTL(panl, pan, "Roughness Amount", 150, 0, 100);
+		c[PC_AO_EN]     = BOOL_CTL(panl, pan, "AO");
+		c[PC_AO_STR]    = SLIDER_CTL(panl, pan, "AO Strength", 150, 0, 100);
+		c[PC_BLUR_SAMP] = POPUP_CTL(panl, pan, "Blur Refl", blurSampleItems);
+		c[PC_BLUR_AMT]  = SLIDER_CTL(panl, pan, "Blur Spread", 150, 0, 100);
+		c[PC_ENV_EN]    = BOOL_CTL(panl, pan, "Env Light");
+		c[PC_ENV_STR]   = SLIDER_CTL(panl, pan, "Env Strength", 150, 0, 100);
+		align_panel(panl, pan);
 
 		/* Set values */
-		SET_FLOAT(ctlIOR, inst->ior);
-		SET_INT(ctlMetallic, inst->metallic);
-		SET_INT(ctlRoughEn, inst->roughEnabled);
-		SET_INT(ctlRoughAmt, inst->roughAmount);
-		aoIdx = inst->aoEnabled ? 1 : 0;
-		SET_INT(ctlAOEn, aoIdx);
-		SET_INT(ctlAOStr, inst->aoStrength);
+		SET_FLOAT(c[PC_IOR], inst->ior);
+		SET_INT(c[PC_METALLIC], inst->metallic);
+		SET_INT(c[PC_ROUGH_EN], inst->roughEnabled);
+		SET_INT(c[PC_ROUGH_AMT], inst->roughAmount);
+		SET_INT(c[PC_AO_EN], inst->aoEnabled);
+		SET_INT(c[PC_AO_STR], inst->aoStrength);
 		blurIdx = inst->blurReflEnabled
-		        ? ((inst->blurReflSamples <= 2) ? 1 : (inst->blurReflSamples <= 4) ? 2 : 3)
+		        ? ((inst->blurReflSamples <= 2) ? 1 : (inst->blurReflSamples <= 4) ? 2
+		          : (inst->blurReflSamples <= 8) ? 3 : 4)
 		        : 0;
-		SET_INT(ctlBlurSamp, blurIdx);
-		SET_INT(ctlBlurAmt, inst->blurReflAmount);
-		envIdx = inst->envEnabled ? 1 : 0;
-		SET_INT(ctlEnvEn, envIdx);
-		SET_INT(ctlEnvStr, inst->envStrength);
+		SET_INT(c[PC_BLUR_SAMP], blurIdx);
+		SET_INT(c[PC_BLUR_AMT], inst->blurReflAmount);
+		SET_INT(c[PC_ENV_EN], inst->envEnabled);
+		SET_INT(c[PC_ENV_STR], inst->envStrength);
 
 		if ((*panl->open)(pan, PANF_BLOCKING | PANF_CANCEL)) {
-			GET_FLOAT(ctlIOR, inst->ior);
-			GET_INT(ctlMetallic, inst->metallic);
-			GET_INT(ctlRoughEn, inst->roughEnabled);
-			GET_INT(ctlRoughAmt, inst->roughAmount);
-			GET_INT(ctlAOEn, aoIdx);
-			inst->aoEnabled = (aoIdx > 0) ? 1 : 0;
-			GET_INT(ctlAOStr, inst->aoStrength);
-			GET_INT(ctlBlurSamp, blurIdx);
+			GET_FLOAT(c[PC_IOR], inst->ior);
+			GET_INT(c[PC_METALLIC], inst->metallic);
+			GET_INT(c[PC_ROUGH_EN], inst->roughEnabled);
+			GET_INT(c[PC_ROUGH_AMT], inst->roughAmount);
+			GET_INT(c[PC_AO_EN], inst->aoEnabled);
+			GET_INT(c[PC_AO_STR], inst->aoStrength);
+			GET_INT(c[PC_BLUR_SAMP], blurIdx);
 			inst->blurReflEnabled = (blurIdx > 0) ? 1 : 0;
-			inst->blurReflSamples = (blurIdx > 0 && blurIdx < 4) ? blurSampleValues[blurIdx] : 8;
-			GET_INT(ctlBlurAmt, inst->blurReflAmount);
-			GET_INT(ctlEnvEn, envIdx);
-			inst->envEnabled = (envIdx > 0) ? 1 : 0;
-			GET_INT(ctlEnvStr, inst->envStrength);
+			inst->blurReflSamples = (blurIdx > 0 && blurIdx < 5) ? blurSampleValues[blurIdx] : 8;
+			GET_INT(c[PC_BLUR_AMT], inst->blurReflAmount);
+			GET_INT(c[PC_ENV_EN], inst->envEnabled);
+			GET_INT(c[PC_ENV_STR], inst->envStrength);
 
 			clamp_settings(inst);
 
@@ -814,6 +962,8 @@ Activate(
 	h->newTime  = (void *)NewTime;
 	h->evaluate = (void *)Evaluate;
 	h->flags    = (void *)Flags;
+
+	gfunc = global;
 
 	msg = (MessageFuncs *)(*global)("Info Messages", GFUSE_TRANSIENT);
 	if (!msg)

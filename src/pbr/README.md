@@ -25,11 +25,24 @@ an IOR-based Fresnel curve. At 100%, the surface is fully metallic with
 near-zero diffuse — appearance dominated by reflections.
 
 ### Blurred Reflections
-Replaces LightWave's single-ray mirror reflections with multi-sample cone
-tracing. Casts 4/8/16 rays around the reflection direction, with cone spread
-controlled by the Blur Spread setting (independent of roughness). The averaged
-result is blended into the surface color, producing soft, spread-out
-reflections for frosted, rough, or brushed materials.
+Replaces LightWave's single mirror ray with 2, 4, 8 or 16 rays spread around
+the mirror direction. Spread sets the width of the cone: 0 traces one sharp
+ray, 100 reaches about 27 degrees off the mirror direction. The averaged
+reflection is added on top of the lit surface the same way LightWave adds its
+own mirror reflection, so switching blur on keeps the surface's brightness; at
+Spread 0 the result matches LightWave's sharp reflection.
+
+To add the reflection after lighting, the shader lights the surface itself
+(ambient light plus every light's contribution, shadows included) and hands
+LightWave the result as a luminous colour. LightWave still adds the specular
+highlight.
+
+Each pixel uses a slightly different set of rays, so few rays at a large
+Spread show as fine grain. More rays or antialiasing smooth it out.
+
+Surfaces with **Color Highlights** on: LightWave tints their reflections with
+the surface colour, but a 5.x shader cannot see surface flags, so blurred
+reflections stay untinted and the highlight takes on the lit colour.
 
 ### Environment Light
 Uses a fast sky-facing normal approximation to add indirect fill light and a
@@ -61,8 +74,8 @@ helps keep surfaces from looking too flat.
 | Roughness Amount | 0 – 100 | 20 | Intensity of normal perturbation |
 | AO | Off/On | Off | Enable the normal-based ambient occlusion approximation |
 | AO Strength | 0 – 100 | 50 | Occlusion darkening intensity |
-| Blur Refl | Off/2/4/8 | Off | Blurred reflection ray samples |
-| Blur Spread | 0 – 100 | 30 | Cone spread angle |
+| Blur Refl | Off/2/4/8/16 | Off | Blurred reflection ray samples |
+| Blur Spread | 0 – 100 | 30 | Cone width (0 = one sharp ray) |
 | Env Light | Off/On | Off | Enable the sky-facing environment light approximation |
 | Env Strength | 0 – 100 | 50 | Indirect lighting intensity |
 
@@ -84,8 +97,8 @@ stack the **Fresnel** plugin on the same surface.
 
 - **Fresnel, Roughness, Metallic**: Very fast — no extra rays, pure math
 - **Ambient Occlusion**: Very fast — normal-based approximation, no extra rays
-- **Blurred Reflections**: Similar cost to AO — casts 4-16 rays per reflective
-  surface point. Only active on surfaces with mirror > 0
+- **Blurred Reflections**: casts 2-16 rays per reflective surface point. Only
+  active on surfaces with mirror > 0
 - **Environment Sampling**: Very fast — normal-based approximation, no extra rays
 - Only **Blurred Reflections** uses extra ray tracing in the current shader
 - On JIT-equipped emulators blurred reflections are quite manageable; on
