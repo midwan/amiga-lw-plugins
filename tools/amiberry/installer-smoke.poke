@@ -10,9 +10,7 @@ wait 150
 # Installation options: Proceed
 click 113 136
 wait 200
-# Build variant: select "68040 with FPU", Proceed
-click 93 92
-wait 100
+# Build variant: keep the CPU-detected default (68040 with FPU), Proceed
 click 113 136
 wait 200
 # Plug-ins drawer (askdir): Proceed

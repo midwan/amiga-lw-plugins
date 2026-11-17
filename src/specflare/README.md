@@ -4,7 +4,7 @@ Post-render image filter that detects bright specular highlights and composites 
 
 ## Installation
 
-1. Run `Install` from the `LW-Plugins` release archive, or copy `specflare.p` from the archive's `Plugins/` drawer matching your CPU (`Generic`, `020fpu`, `040fpu`, or `060fpu`) to the LightWave plugins directory.
+1. Run `Install` from the `LW-Plugins` release archive, or copy `specflare.p` from the archive's `Plugins/` drawer matching your CPU (`020fpu`, `040fpu`, or `060fpu`) to the LightWave plugins directory.
 2. Start Layout without loading a scene, choose **Options → Add Plug-Ins**, and select `specflare.p`.
 3. Restart Layout after registering the plugin.
 

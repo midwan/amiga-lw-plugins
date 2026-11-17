@@ -8,27 +8,31 @@
 - **Compiler**: `m68k-amigaos-gcc` 16.2.1b (AmigaDev 16.2-rc24-9 on 2026-11-12). GCC 16
   defaults to C23, `-fno-common` and LRA (`-mlra` is already on)
 - **Build wrapper**: `./build.sh` runs `make` inside Docker, mounting the project at `/work`
-- **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall $(EXTRA_CFLAGS)` (`CPUFLAGS` defaults to `-m68020`, soft-float).
+- **Key compiler flags**: `-noixemul $(CPUFLAGS) -O2 -Wall $(EXTRA_CFLAGS)` (`CPUFLAGS` defaults to `-m68020 -m68881`).
   CI passes `EXTRA_CFLAGS=-Werror`, so every build must stay warning-free
 - **Key linker flags**: `-noixemul -nostartfiles $(CPUFLAGS)`
 - **Required link libraries**: `-lm -lgcc` (math and GCC runtime)
-- **FPU variants**: `make fpu` (or `020fpu`/`040fpu`/`060fpu`) builds into `build-<variant>/` with its own `sdklib/`
-- **Release package**: `make package` → `build/LW-Plugins-<version>.lha` (Generic + FPU builds, Commodore Installer script `package/Install`, Latin-1 docs). `package/Install` must stay LF (`.gitattributes`). `(database "fpu")` returns `unknown` on the OS 3.1 Installer, so FPU builds are preselected only when an FPU is reported
+- **No soft-float build**: LightWave 5.x itself needs an FPU (it ships as `layout.fp`,
+  `Modeler.fp` and `Lwsn.fp`; Layout and Modeler are full of inline 68881 code), so every build uses `-m68881`. The default
+  build (`build/`) targets 68020/68030 + 68881/68882
+- **CPU variants**: `make variants` (or `040fpu`/`060fpu`) builds into `build-<variant>/` with its own `sdklib/`.
+  After changing `CPUFLAGS`, `make clean` first: objects do not depend on the flags
+- **Release package**: `make package` → `build/LW-Plugins-<version>.lha` (`Plugins/020fpu` from `build/`, plus `040fpu`/`060fpu`, Commodore Installer script `package/Install`, Latin-1 docs). `package/Install` must stay LF (`.gitattributes`). `(database "fpu")` returns `unknown` on the OS 3.1 Installer, so the Installer preselects the build from `(database "cpu")` (and a resident `68060.library`) only
 
-### FPU variant notes
+### FPU build notes
 
 - With `-m68881`, GCC returns `float`/`double` in `fp0` instead of `d0/d1`. Arguments are still
   passed on the stack, so host callbacks are ABI-compatible as long as their `double` return
   value is not used. No plugin currently consumes one (`pbr.c` ignores the `rayTrace` result).
   Verify the LightWave host convention before using a `double` return from `rayTrace`,
-  `rayCast`, `rayShade`, `LWCameraInfo`, `LWFogInfo`, etc. in an FPU build.
+  `rayCast`, `rayShade`, `LWCameraInfo`, `LWFogInfo`, etc.
 - The libnix driver links all three variants against `libm020/libm881`. In the GCC 16
   image its `sin`/`cos` are inline `fsin`/`fcos` (68881/68882 only; 040/060 trap them to
   `68040.library`/`68060.library`), while `pow` and friends call `mathieeedoubtrans.library`
   and return in `fp0`. Use `sdk/include/trig_approx.h` (`sin_approx`/`cos_approx`) instead of
-  libm `sin`/`cos` (Motion, Instancer). `slib4.c` must still open the math libraries in FPU
-  builds (`pow` in NormalMap and PostFilter).
-- `020fpu` emits `fmovecr`/`fintrz` (68881/68882 only; trapped and emulated on 040/060).
+  libm `sin`/`cos` (Motion, Instancer). `slib4.c` must still open the math libraries
+  (`pow` in NormalMap and PostFilter).
+- The default build emits `fmovecr`/`fintrz` (68881/68882 only; trapped and emulated on 040/060).
   `040fpu`/`060fpu` emit `fd*`/`fs*` (040/060 FPU only). `060fpu` may emit `fintrz`.
 - FPU code saves `fp2`–`fp7` (12 bytes each) in function prologues; keep this in mind for the
   callback stack budget below.
@@ -101,13 +105,13 @@ address error crashes (guru $80000003). Rules:
 ### CRITICAL: Math library initialization
 
 **Problem (solved)**: Using `-nostartfiles` skips libnix's C startup, which normally opens
-`mathieeedoubbas.library` and `mathieeedoubtrans.library`. GCC's soft-float math stubs
-(`__adddf3`, `__muldf3`, `__divdf3`, `sqrt`, etc.) call through `MathIeeeDoubBasBase` and
-`MathIeeeDoubTransBase` library base pointers. Without initialization, these contain garbage
-→ address error (guru $80000003) on first floating-point operation.
+`mathieeedoubbas.library` and `mathieeedoubtrans.library`. libm functions such as `pow`
+(and, in a soft-float build, GCC's `__adddf3`/`__muldf3`/`__divdf3` stubs) call through
+`MathIeeeDoubBasBase` and `MathIeeeDoubTransBase` library base pointers. Without
+initialization, these contain garbage → address error (guru $80000003) on the first call.
 
 **Fix**: `slib4.c` `_Startup()` now opens both math libraries via weak references, and
-`_Shutdown()` closes them. Plugins that don't use floating-point won't pull in these symbols
+`_Shutdown()` closes them. Plugins that don't use these functions won't pull in the symbols
 and are unaffected.
 
 **Verified**: spikey.p (uses `sqrt`, multiply, divide on doubles) runs correctly in LightWave
@@ -534,7 +538,7 @@ applies the panel limits after every load.
   `LWLFL_NO_DIFFUSE` are skipped), writes the finished colour with
   luminous 1, diffuse 0, mirror 0. LightWave adds specular
 - Spread 0 matches the native mirror render except for ~50 silhouette pixels
-  (Generic and 040fpu identical)
+  (the former soft-float build and 040fpu identical)
 - Flags: LWSHF_COLOR | LWSHF_LUMINOUS | LWSHF_DIFFUSE | LWSHF_MIRROR | LWSHF_RAYTRACE
 
 ### Environment Light

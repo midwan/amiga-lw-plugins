@@ -21,7 +21,7 @@ Without that volume the hook does nothing.
 | `run.ps1` | Starts Amiberry with a config (`-f <config> -G`), screenshots the window every few seconds, waits for a marker line in a log on the `LWTest` volume, then stops the instance it started. Refuses to run while another Amiberry is open. |
 | `Startup` | `LWTest:Startup`: logs `start` and runs `LWTest:Later` in the background, so Workbench can load first. |
 | `installer-smoke.later` | Copy to `LWTest:Later`. Starts `zzpoke`, then the Installer on `LWTest:LW-Plugins/Install`, and logs `installer rc=<n>`. |
-| `installer-smoke.poke` | Copy to `LWTest:poke`. Clicks through the OS 3.1 Installer (43.3) on a 1280x1024 Workbench and installs the 68040 FPU build (with GEOimport) plus docs. |
+| `installer-smoke.poke` | Copy to `LWTest:poke`. Clicks through the OS 3.1 Installer (43.3) on a 1280x1024 Workbench, keeps the build it preselects for the 68040 guest (`040fpu`), and installs it (with GEOimport) plus docs. |
 | `zzpoke.c` | Sends real `input.device` mouse/key events to a window found by title prefix. |
 | `rtgmode.c` | Lists `uaegfx` (`UAE:`) modes and writes `ENVARC:`/`ENV:` `lwRTG.cfg` (LightwaveRTG screen mode) and, with `WB`, `screenmode.prefs`. |
 
