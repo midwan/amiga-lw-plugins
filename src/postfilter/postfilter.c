@@ -559,7 +559,7 @@ typedef struct {
 } PanelCtl;
 
 #define PF_FIELD(name) (offsetof(PostFilterInst, name) / sizeof(int))
-#define SLIDER_W 120
+#define SLIDER_W 100
 #define ROW_GAP 8
 #define COLUMN_GAP 16
 
@@ -568,7 +568,7 @@ typedef struct {
  * them. */
 static const PanelCtl panelCtls[] = {
 	{ .label = "Region", .kind = CK_POPUP, .field = PF_FIELD(region), .items = regionItems },
-	{ .label = "Enable Colour", .kind = CK_BOOL, .field = PF_FIELD(enableColor) },
+	{ .label = "Colour", .kind = CK_BOOL, .field = PF_FIELD(enableColor) },
 	{ .label = "Red %", .kind = CK_SLIDER, .field = PF_FIELD(red), .min = 0, .max = 200 },
 	{ .label = "Green %", .kind = CK_SLIDER, .field = PF_FIELD(green), .min = 0, .max = 200 },
 	{ .label = "Blue %", .kind = CK_SLIDER, .field = PF_FIELD(blue), .min = 0, .max = 200 },
@@ -578,16 +578,16 @@ static const PanelCtl panelCtls[] = {
 	{ .label = "Saturation %", .kind = CK_SLIDER, .field = PF_FIELD(saturation), .min = 0, .max = 200 },
 	{ .label = "Greyscale", .kind = CK_BOOL, .field = PF_FIELD(greyscale) },
 	{ .label = "Negative", .kind = CK_BOOL, .field = PF_FIELD(negative), .sameRow = 1 },
-	{ .label = "Posterize Levels", .kind = CK_SLIDER, .field = PF_FIELD(posterize), .min = 0, .max = 32 },
-	{ .label = "Enable Grain", .kind = CK_BOOL, .field = PF_FIELD(enableNoise) },
+	{ .label = "Posterize", .kind = CK_SLIDER, .field = PF_FIELD(posterize), .min = 0, .max = 32 },
+	{ .label = "Grain", .kind = CK_BOOL, .field = PF_FIELD(enableNoise) },
 	{ .label = "Grain Amount", .kind = CK_SLIDER, .field = PF_FIELD(noise), .min = 0, .max = 100 },
-	{ .label = "Enable Blur", .kind = CK_BOOL, .field = PF_FIELD(enableBlur) },
+	{ .label = "Blur", .kind = CK_BOOL, .field = PF_FIELD(enableBlur) },
 	{ .label = "Blur Radius", .kind = CK_SLIDER, .field = PF_FIELD(blurRadius), .min = 1, .max = 12 },
 	{ .label = "Blur Style", .kind = CK_POPUP, .field = PF_FIELD(blurStyle), .items = blurItems },
-	{ .label = "Enable Smooth", .kind = CK_BOOL, .field = PF_FIELD(enableSmooth) },
+	{ .label = "Smooth", .kind = CK_BOOL, .field = PF_FIELD(enableSmooth) },
 	{ .label = "Smooth Variance", .kind = CK_SLIDER, .field = PF_FIELD(variance), .min = 0, .max = 255 },
 	{ .label = "Passes", .kind = CK_SLIDER, .field = PF_FIELD(passes), .min = 1, .max = 4 },
-	{ .label = "Enable Sharpen", .kind = CK_BOOL, .field = PF_FIELD(enableSharpen) },
+	{ .label = "Sharpen", .kind = CK_BOOL, .field = PF_FIELD(enableSharpen) },
 	{ .label = "Sharpen Amount", .kind = CK_SLIDER, .field = PF_FIELD(sharpen), .min = 0, .max = 200 },
 };
 
@@ -615,12 +615,20 @@ con_move(LWControl *ctl, int x, int y)
 	MOVE_CON(ctl, x, y);
 }
 
-/* Move one column of auto-placed controls by (dx, dy), pulling every
- * control below a sameRow pair up by the row that pair no longer uses. */
+/* Place one column of auto-placed controls with its left edge at x and its
+ * rows moved by dy. Labels are right-aligned so every slider, popup and
+ * check box starts at the same x. A row shared by several controls (the
+ * sameRow ones go to the right of the previous control) starts at x so it
+ * stays within the column, and the rows below move up by the rows freed. */
 static void
-place_column(LWControl **con, const PanelCtl *spec, int count, int dx, int dy)
+place_column(LWControl **con, const PanelCtl *spec, int count, int x, int dy)
 {
-	int i, lift = 0, prevAuto = 0;
+	int i, label, hot = 0, lift = 0, prevAuto = 0;
+	for (i = 0; i < count; i++) {
+		if (spec[i].sameRow) continue;
+		label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
+		if (label > hot) hot = label;
+	}
 	for (i = 0; i < count; i++) {
 		int autoY = con_get(con[i], CTL_Y);
 		if (spec[i].sameRow && i > 0) {
@@ -628,8 +636,11 @@ place_column(LWControl **con, const PanelCtl *spec, int count, int dx, int dy)
 				con_get(con[i - 1], CTL_X) + con_get(con[i - 1], CTL_W) + ROW_GAP,
 				con_get(con[i - 1], CTL_Y));
 			lift += autoY - prevAuto;
+		} else if (i + 1 < count && spec[i + 1].sameRow) {
+			con_move(con[i], x, autoY - lift + dy);
 		} else {
-			con_move(con[i], con_get(con[i], CTL_X) + dx, autoY - lift + dy);
+			label = con_get(con[i], CTL_HOTX) - con_get(con[i], CTL_X);
+			con_move(con[i], x + hot - label, autoY - lift + dy);
 		}
 		prevAuto = autoY;
 	}
@@ -638,36 +649,29 @@ place_column(LWControl **con, const PanelCtl *spec, int count, int dx, int dy)
 static void
 layout_panel(LWPanelFuncs *panl, LWPanelID pan)
 {
-	int i, x, edge, autoBottom = 0, bottom = 0, right = 0, left, dx, dy;
+	int i, edge, autoBottom = 0, bottom = 0, right = 0, margin, dy;
 	for (i = 0; i < CTL_COUNT; i++) {
 		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
 		if (edge > autoBottom) autoBottom = edge;
 	}
 	/* Space LWPanels leaves under the controls for its OK/Cancel row. */
 	autoBottom = PAN_GETH(panl, pan) - autoBottom;
-	place_column(panelCon, panelCtls, LEFT_COUNT, 0, 0);
+	margin = con_get(panelCon[0], CTL_X);
+	dy = con_get(panelCon[0], CTL_Y) - con_get(panelCon[LEFT_COUNT], CTL_Y);
+	place_column(panelCon, panelCtls, LEFT_COUNT, margin, 0);
 	for (i = 0; i < LEFT_COUNT; i++) {
 		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
 		if (edge > right) right = edge;
 	}
-	left = con_get(panelCon[LEFT_COUNT], CTL_X);
-	for (i = LEFT_COUNT + 1; i < CTL_COUNT; i++) {
-		x = con_get(panelCon[i], CTL_X);
-		if (x < left) left = x;
-	}
-	dx = right + COLUMN_GAP - left;
-	dy = con_get(panelCon[0], CTL_Y) - con_get(panelCon[LEFT_COUNT], CTL_Y);
-	place_column(panelCon + LEFT_COUNT, panelCtls + LEFT_COUNT, CTL_COUNT - LEFT_COUNT, dx, dy);
-	left = con_get(panelCon[0], CTL_X);
+	place_column(panelCon + LEFT_COUNT, panelCtls + LEFT_COUNT, CTL_COUNT - LEFT_COUNT,
+		right + COLUMN_GAP, dy);
 	for (i = 0; i < CTL_COUNT; i++) {
-		x = con_get(panelCon[i], CTL_X);
-		if (x < left) left = x;
-		edge = x + con_get(panelCon[i], CTL_W);
+		edge = con_get(panelCon[i], CTL_X) + con_get(panelCon[i], CTL_W);
 		if (edge > right) right = edge;
 		edge = con_get(panelCon[i], CTL_Y) + con_get(panelCon[i], CTL_H);
 		if (edge > bottom) bottom = edge;
 	}
-	PAN_SETW(panl, pan, right + left);
+	PAN_SETW(panl, pan, right + margin);
 	PAN_SETH(panl, pan, bottom + autoBottom);
 }
 
